@@ -11,7 +11,7 @@ class StackVM:
     def __init__(self):
         self.feat_offset = FeatureEngineer.INPUT_DIM
         ops = get_ops()
-        self.op_map = {i + self.feat_offset: (func, arity) for i, (_, func, arity) in enumerate(ops)}
+        self.op_map = {i + self.feat_offset: (name, func, arity) for i, (name, func, arity) in enumerate(ops)}
         self.arity_map = {i + self.feat_offset: arity for i, (_, _, arity) in enumerate(ops)}
 
     def execute(self, formula_tokens, features: list[pd.Series]):

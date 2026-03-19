@@ -29,8 +29,7 @@ class AlphaBacktest:
         评估时按 index 对齐，取交集后计算 IC。
         """
         common = factor.index.intersection(returns.index)
-
-        bad_reward = (torch.tensor(self.penalty, dtype=torch.float32, device=ModelConfig.DEVICE), 0.0, 0.0, 0.0, 0.0)
+        bad_reward = (torch.tensor(self.penalty, dtype=torch.float32, device=ModelConfig.DEVICE), self.penalty, 0.0, 0.0, 0.0)
         
         if len(common) == 0:
             return bad_reward
@@ -40,18 +39,21 @@ class AlphaBacktest:
         mask = np.isfinite(f) & np.isfinite(r)
         if mask.sum() == 0:
             return bad_reward
-
+        
         f = f[mask]
         r = r[mask]
+        common = common[mask]
 
         if not check_finite_count(f):
             return bad_reward
-        
+
         if not check_distribution(f):
             return bad_reward
-            
+        
+
         if not check_halflife(f):
             return bad_reward
+
 
         overall_ic = finite_rcor(f, r)
         if not np.isfinite(overall_ic):

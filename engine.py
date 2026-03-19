@@ -98,13 +98,17 @@ class AlphaEngine:
                     rewards[i] = -2.0
                     continue
                 
-                score, daily_icir, monthly_icir, overall_ic = self.bt.evaluate(res, self.loader.returns)
-                rewards[i] = score
-                
-                if score.item() > self.best_score:
-                    self.best_score = score.item()
+                reward, score, daily_icir, monthly_icir, overall_ic = self.bt.evaluate(res, self.loader.returns)
+                rewards[i] = reward
+                print(score, daily_icir, monthly_icir, overall_ic)
+
+                if score > self.best_score:
+                    self.best_score = score
                     self.best_formula = formula
-                    tqdm.write(f"[!] New King: Score {score:.2f} | Daily ICIR {daily_icir:.2f} | Monthly ICIR {monthly_icir:.2f} | Overall IC {overall_ic:.2f} | Formula {formula}")
+                    # 将 formula 转换为字符串
+                    formula_str = " ".join([self.vm.op_map[i][0] for i in formula])
+
+                    tqdm.write(f"[!] New King: Score {score:.2f} | Daily ICIR {daily_icir:.2f} | Monthly ICIR {monthly_icir:.2f} | Overall IC {overall_ic:.2f} | Formula {formula_str}")
             
             # Normalize rewards
             adv = (rewards - rewards.mean()) / (rewards.std() + 1e-5)
