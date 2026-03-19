@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+*.swp
+*.swo
+*~
+
+olhcv.feather
+returns/
+best_meme_strategy.json
+training_history.json
+STOP_SIGNAL
+model_core.egg-info/
