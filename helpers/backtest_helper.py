@@ -15,6 +15,39 @@ def check_distribution(arr: np.ndarray) -> bool:
         return False
     return True
 
+
+def score_finite_ratio(arr: np.ndarray, min_ratio: float = 0.95) -> float:
+    """返回 [0, 1] 的有限值比例分数，1 表示完全通过。"""
+    finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
+    return min(1.0, finite_ratio / min_ratio)
+
+
+def score_distribution(arr: np.ndarray, skew_limit: float = 40.0, kurt_limit: float = 1000.0) -> float:
+    """返回 [0, 1] 的分布分数，1 表示完全通过。"""
+    fv = arr.copy()
+    fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
+    skew = pd.Series(fv).skew()
+    kurt = pd.Series(fv).kurt()
+    if np.isnan(skew) or np.isnan(kurt):
+        return 0.0
+    if np.nanstd(fv) == 0:
+        return 0.0
+    # 线性插值：skew 在 [0, 10] 得 1，在 [10, 20] 线性降到 0
+    skew_score = max(0.0, 1.0 - abs(skew) / skew_limit)
+    kurt_score = max(0.0, 1.0 - abs(kurt) / kurt_limit)
+    return min(skew_score, kurt_score)
+
+
+def score_halflife(arr: np.ndarray, min_corr: float = 0.5) -> float:
+    """返回 [0, 1] 的半衰期分数，corr >= min_corr 得 1。"""
+    shifted = np.roll(arr, 5)
+    shifted[:5] = np.nan
+    corr = finite_rcor(arr, shifted)
+    if np.isnan(corr) or np.isinf(corr):
+        return 0.0
+    return min(1.0, max(0.0, (corr + 1.0) / (min_corr + 1.0)))  # 从 -1 到 min_corr 线性映射到 [0,1]
+
+
 def check_finite_count(arr: np.ndarray, min_ratio: float = 0.95) -> bool:
     finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
     return finite_ratio >= min_ratio
@@ -34,11 +67,18 @@ def calc_monthlyic(df):
 	sum_fr = np.bincount(inv, weights=f * r)
 	sum_f2 = np.bincount(inv, weights=f * f)
 	sum_r2 = np.bincount(inv, weights=r * r)
-	monthly_ic_values = sum_fr / np.sqrt(sum_f2) / np.sqrt(sum_r2)
+
+	denom = np.sqrt(sum_f2) * np.sqrt(sum_r2)
+	monthly_ic_values = np.divide(
+		sum_fr,
+		denom,
+		out=np.full_like(sum_fr, np.nan, dtype=float),
+		where=(denom != 0) & np.isfinite(denom)
+	)
 
 	monthly_ic = pd.Series(
 		monthly_ic_values,
-		index=pd.to_datetime(unique_months, unit='M').date.strftime('%Y-%m')
+		index=pd.to_datetime(unique_months, unit='M').strftime('%Y-%m')
 	)
 	return monthly_ic
 
@@ -51,7 +91,16 @@ def calc_dailyic(df):
 	sum_fr = np.bincount(inv, weights=f * r)
 	sum_f2 = np.bincount(inv, weights=f * f)
 	sum_r2 = np.bincount(inv, weights=r * r)
-	daily_ic_values = sum_fr / np.sqrt(sum_f2) / np.sqrt(sum_r2)
+	
+	denom = np.sqrt(sum_f2) * np.sqrt(sum_r2)
+
+	daily_ic_values = np.divide(
+		sum_fr,
+		denom,
+		out=np.full_like(sum_fr, np.nan, dtype=float),
+		where=(denom != 0) & np.isfinite(denom)
+	)
+
 	daily_ic = pd.Series(
 		daily_ic_values,
 		index=pd.to_datetime(unique_days, unit='D').date

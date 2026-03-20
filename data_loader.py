@@ -49,6 +49,7 @@ class AlphaDataLoader:
         self.raw_cache = {
             c: col_to_series(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])
         }
+        self.feature_cols = feature_cols  # 特征真名，供 formula 展示用
         self.features = [self.raw_cache[c] for c in feature_cols]
 
         FeatureEngineer.INPUT_DIM = len(feature_cols)

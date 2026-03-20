@@ -26,7 +26,7 @@ class StackVM:
                 if token < self.feat_offset:
                     stack.append(features[token].copy())
                 elif token in self.op_map:
-                    func, arity = self.op_map[token]
+                    name, func, arity = self.op_map[token]
                     if len(stack) < arity:
                         return None
                     args = [stack.pop() for _ in range(arity)]
@@ -34,8 +34,6 @@ class StackVM:
                     res = func(*args)
                     if res is None:
                         return None
-                    # 简单 nan/inf 处理
-                    res = res.replace([np.inf, -np.inf], np.nan).fillna(0.0)
                     stack.append(res)
                 else:
                     return None

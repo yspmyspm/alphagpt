@@ -29,5 +29,11 @@ class ModelConfig:
     TRAIN_STEPS = 1000
     MAX_FORMULA_LEN = 12
 
+    # Reward 平滑：True 时约束失败按合规程度线性插值，而非直接 -5
+    USE_SMOOTH_REWARD = True
+
+    # 并行评估：验证公式时使用的进程数，0 表示不并行
+    EVAL_NUM_WORKERS = max(1, (os.cpu_count() or 4) - 1)
+
     # 特征维度：由 data_loader 加载后设置，与 feather 中特征列数一致
     INPUT_DIM = None
