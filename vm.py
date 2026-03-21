@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from helpers.ops import get_ops
+from helpers.ops import get_op_specs, get_ts_parameters
 from factors import FeatureEngineer
 
 
@@ -10,9 +10,17 @@ class StackVM:
 
     def __init__(self):
         self.feat_offset = FeatureEngineer.INPUT_DIM
-        ops = get_ops()
-        self.op_map = {i + self.feat_offset: (name, func, arity) for i, (name, func, arity) in enumerate(ops)}
-        self.arity_map = {i + self.feat_offset: arity for i, (_, _, arity) in enumerate(ops)}
+        self.ts_parameters = get_ts_parameters()
+        self.param_start = self.feat_offset
+        self.param_end = self.param_start + len(self.ts_parameters)
+
+        op_specs = get_op_specs()
+        self.op_start = self.param_end
+        self.op_map = {
+            i + self.op_start: (name, func, kind, arity)
+            for i, (name, func, kind, arity) in enumerate(op_specs)
+        }
+        self.arity_map = {tid: arity for tid, (_, _, _, arity) in self.op_map.items()}
 
     def execute(self, formula_tokens, features: list[pd.Series]):
         """
@@ -25,13 +33,46 @@ class StackVM:
                 token = int(token)
                 if token < self.feat_offset:
                     stack.append(features[token].copy())
+                elif self.param_start <= token < self.param_end:
+                    stack.append(self.ts_parameters[token - self.param_start])
                 elif token in self.op_map:
-                    name, func, arity = self.op_map[token]
-                    if len(stack) < arity:
+                    name, func, kind, arity = self.op_map[token]
+
+                    if kind == "binary":
+                        if len(stack) < 2:
+                            return None
+                        y = stack.pop()
+                        x = stack.pop()
+                        if not isinstance(x, pd.Series) or not isinstance(y, pd.Series):
+                            return None
+                        res = func(x, y)
+                    elif kind in ("unary_parameterized", "ts_unary"):
+                        if len(stack) < 2:
+                            return None
+                        param = stack.pop()
+                        x = stack.pop()
+                        if not isinstance(x, pd.Series) or not isinstance(param, (int, float)):
+                            return None
+                        res = func(x, int(param))
+                    elif kind == "unary_parameterless":
+                        if len(stack) < 1:
+                            return None
+                        x = stack.pop()
+                        if not isinstance(x, pd.Series):
+                            return None
+                        res = func(x)
+                    elif kind == "ts_binary":
+                        if len(stack) < 3:
+                            return None
+                        param = stack.pop()
+                        y = stack.pop()
+                        x = stack.pop()
+                        if not isinstance(x, pd.Series) or not isinstance(y, pd.Series) or not isinstance(param, (int, float)):
+                            return None
+                        res = func(x, y, int(param))
+                    else:
                         return None
-                    args = [stack.pop() for _ in range(arity)]
-                    args.reverse()
-                    res = func(*args)
+
                     if res is None:
                         return None
                     stack.append(res)

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from config import ModelConfig
-from helpers.ops import get_ops
+from helpers.ops import get_op_specs, get_ts_parameters
 from factors import FeatureEngineer
 
 
@@ -225,10 +225,19 @@ class AlphaGPT(nn.Module):
         self.d_model = 64
         # 与 FeatureEngineer.INPUT_DIM 对齐的占位特征 token
         self.features_list = [f"F{i}" for i in range(FeatureEngineer.INPUT_DIM)]
-        self.ops_list = [name for name, _, _ in get_ops()]
+        self.ts_parameters = get_ts_parameters()
+        self.ts_param_tokens = [f"TS_{v}" for v in self.ts_parameters]
+        self.op_specs = get_op_specs()
+        self.ops_list = [name for name, _, _, _ in self.op_specs]
         
-        self.vocab = self.features_list + self.ops_list
+        self.eos_token = "<EOS>"
+        self.vocab = self.features_list + self.ts_param_tokens + self.ops_list + [self.eos_token]
         self.vocab_size = len(self.vocab)
+        self.eos_token_id = self.vocab.index(self.eos_token)
+        self.ts_param_start = len(self.features_list)
+        self.ts_param_end = self.ts_param_start + len(self.ts_param_tokens)
+        self.op_start = self.ts_param_end
+        self.op_end = self.op_start + len(self.ops_list)
         
         # Embedding
         self.token_emb = nn.Embedding(self.vocab_size, self.d_model)

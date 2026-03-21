@@ -10,7 +10,7 @@ class ModelConfig:
     """
 
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(DEVICE)
+    
 
     # 本地 feather 数据路径
     FEATHER_PATH = os.getenv("FEATHER_PATH", os.path.join("data", "olhcv.feather"))
@@ -28,9 +28,15 @@ class ModelConfig:
     BATCH_SIZE = 1024
     TRAIN_STEPS = 1000
     MAX_FORMULA_LEN = 12
+    GEN_TEMPERATURE = 1.0
+    TS_PARAMETERS = [1, 5, 10, 30, 60, 120, 1440]
 
     # Reward 平滑：True 时约束失败按合规程度线性插值，而非直接 -5
     USE_SMOOTH_REWARD = True
+    BACKTEST_PENALTY = -5.0
+    UNFINISHED_PENALTY = -5.0
+    ICIR_MISSING_GAMMA = 2.0
+    ICIR_MISSING_EPS = 1e-6
 
     # 并行评估：验证公式时使用的进程数，0 表示不并行
     EVAL_NUM_WORKERS = max(1, (os.cpu_count() or 4) - 1)

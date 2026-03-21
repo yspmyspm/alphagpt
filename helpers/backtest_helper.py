@@ -112,10 +112,20 @@ def r_cor(
 	f2: np.ndarray, 
 	weight = None
 ):
-	if weight is None:
-		return np.dot(f1, f2) / np.sqrt(np.dot(f1, f1) * np.dot(f2, f2))
+	if isinstance(f1, pd.Series):
+		_f1 = f1.replace([np.inf, -np.inf, np.nan], 0).to_numpy()
 	else:
-		return np.dot(weight*f1, f2) / np.sqrt(np.dot(weight*f1, weight*f1) * np.dot(weight*f2, weight*f2))
+		_f1 = np.copy(f1)
+		_f1[~np.isfinite(_f1)] = 0
+	if isinstance(f2, pd.Series):
+		_f2 = f2.replace([np.inf, -np.inf, np.nan], 0).to_numpy()
+	else:
+		_f2 = np.copy(f2)
+		_f2[~np.isfinite(_f2)] = 0
+	if weight is None:
+		return np.dot(_f1, _f2) / np.sqrt(np.dot(_f1, _f1) * np.dot(_f2, _f2))
+	else:
+		return np.dot(weight*_f1, _f2) / np.sqrt(np.dot(weight*_f1, weight*_f1) * np.dot(weight*_f2, weight*_f2))
 
 def finite_rcor(f1, f2, weight = None):
 	if isinstance(f1, pd.Series):

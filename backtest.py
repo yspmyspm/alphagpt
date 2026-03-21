@@ -27,19 +27,42 @@ class AlphaBacktest:
     评估时对齐 factor 与 returns 的 index。
     """
 
-    def __init__(self, penalty=-5.0, use_smooth_reward=True):
+    def __init__(self, penalty=None, use_smooth_reward=True):
+        if penalty is None:
+            penalty = getattr(ModelConfig, 'BACKTEST_PENALTY', -5.0)
         self.penalty = penalty
         self.use_smooth_reward = use_smooth_reward
+        self.icir_missing_gamma = float(getattr(ModelConfig, 'ICIR_MISSING_GAMMA', 2.0))
+        self.icir_missing_eps = float(getattr(ModelConfig, 'ICIR_MISSING_EPS', 1e-6))
+
+    def _missing_penalty_factor(self, coverage: float) -> float:
+        """coverage 越低，惩罚越强；gamma=2 时为二次惩罚。"""
+        c = float(np.clip(coverage, 0.0, 1.0))
+        return max(self.icir_missing_eps, c) ** self.icir_missing_gamma
 
     def eval_final_reward(
         self, 
-        daily_icir: float, 
-        monthly_icir: float, 
-        overall_ic: float, 
-        daily_ic_std: float, 
-        monthly_ic_std: float
+        daily_ic: pd.Series,
+        monthly_ic: pd.Series,
+        overall_ic: float,
     ) -> float:
-        return daily_icir * 0.3 + monthly_icir * 0.3 + overall_ic / (daily_ic_std / 2 + monthly_ic_std / 2 + 1e-8) * 0.4
+        daily_std = daily_ic.std()
+        monthly_std = monthly_ic.std()
+        daily_icir = daily_ic.mean() / daily_std if daily_std > 1e-8 else 0.0
+        monthly_icir = monthly_ic.mean() / monthly_std if monthly_std > 1e-8 else 0.0
+
+        daily_coverage = float(np.isfinite(daily_ic.to_numpy(dtype=np.float64)).mean()) if len(daily_ic) > 0 else 0.0
+        monthly_coverage = float(np.isfinite(monthly_ic.to_numpy(dtype=np.float64)).mean()) if len(monthly_ic) > 0 else 0.0
+
+        daily_icir *= self._missing_penalty_factor(daily_coverage)
+        monthly_icir *= self._missing_penalty_factor(monthly_coverage)
+        ic_score = overall_ic / (daily_std / 2 + monthly_std / 2 + 1e-8)
+
+        score = 0
+        score += daily_icir * 0.3
+        score += monthly_icir * 0.3
+        score += ic_score * 0.4
+        return score, daily_icir, monthly_icir
 
     def evaluate(self, factor: pd.Series, returns: pd.Series):
         """
@@ -66,6 +89,7 @@ class AlphaBacktest:
         if len(common) == 0:
             return bad_reward_tuple
 
+        common_len = len(common)
         f = factor.reindex(common).values.astype(np.float64)
         r = returns.reindex(common).values.astype(np.float64)
         mask = np.isfinite(f) & np.isfinite(r)
@@ -100,14 +124,9 @@ class AlphaBacktest:
                 return bad_reward_tuple
 
         monthly_ic = calc_monthlyic(pd.DataFrame({'factor': f, 'returns': r}, index=common))
-        monthly_ic_std = monthly_ic.std()
-        monthly_icir = monthly_ic.mean() / monthly_ic_std if monthly_ic_std > 1e-8 else 0.0
-
         daily_ic = calc_dailyic(pd.DataFrame({'factor': f, 'returns': r}, index=common))
-        daily_ic_std = daily_ic.std()
-        daily_icir = daily_ic.mean() / daily_ic_std if daily_ic_std > 1e-8 else 0.0
 
-        good_reward = self.eval_final_reward(daily_icir, monthly_icir, overall_ic, daily_ic_std, monthly_ic_std)
+        good_reward, daily_icir, monthly_icir = self.eval_final_reward(daily_ic, monthly_ic, overall_ic)
         if not np.isfinite(good_reward):
             good_reward = 0.0
 
