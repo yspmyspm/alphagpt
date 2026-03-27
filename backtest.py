@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import torch
 
@@ -25,11 +24,6 @@ class AlphaBacktest:
         self.use_smooth_reward = use_smooth_reward
         self.icir_missing_gamma = float(getattr(ModelConfig, 'ICIR_MISSING_GAMMA', 2.0))
         self.icir_missing_eps = float(getattr(ModelConfig, 'ICIR_MISSING_EPS', 1e-6))
-
-    def _missing_penalty_factor(self, coverage: float) -> float:
-        """coverage 越低，惩罚越强；gamma=2 时为二次惩罚。"""
-        c = float(np.clip(coverage, 0.0, 1.0))
-        return max(self.icir_missing_eps, c) ** self.icir_missing_gamma
 
     def eval_final_reward(
         self,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -77,7 +77,6 @@ def update_pool_monitoring(
     test_idx: pd.Index,
     trainer: LinearMeanStdEnsembleTrainer,
     *,
-    fragment_eval: bool,
     icir_missing_gamma: float,
     icir_missing_eps: float,
     bt: AlphaBacktest,
@@ -86,6 +85,9 @@ def update_pool_monitoring(
     """
     用当前 pool 在 train/test 划分下拟合权重，生成全时段线性预测；
     在全样本上与 returns 对齐后，用完整 evaluate（含 compliance）与 IC 分解指标记录并落盘。
+
+    注意：此处拟合权重固定使用 fragment_eval=False（与 eval_final_reward / 全样本曲线一致）。
+    batch 内 RL reward 仍由 AlphaPoolBatchEvaluator 的 fragment_eval 配置单独控制。
     """
     factors = pool.factor_series_list()
     pool_dir = os.path.join(run_dir, "pool_artifacts")
@@ -101,15 +103,13 @@ def update_pool_monitoring(
         test_idx,
         icir_missing_gamma=icir_missing_gamma,
         icir_missing_eps=icir_missing_eps,
-        fragment_eval=fragment_eval,
+        fragment_eval=False,
     )
     pred = build_full_prediction(factors, returns, fit.weights)
-    ret_a = returns.reindex(pred.index)
+    if len(pred) == 0:
+        return
 
-    pred.to_csv(os.path.join(pool_dir, "prediction_latest.csv"), header=True)
-    pd.DataFrame({"prediction": pred, "returns": ret_a}).to_csv(
-        os.path.join(pool_dir, "prediction_returns_latest.csv")
-    )
+    ret_a = returns.reindex(pred.index)
 
     m = metrics_from_factor_returns_full(
         pred,
@@ -119,6 +119,11 @@ def update_pool_monitoring(
     )
     if m is None:
         return
+
+    pd.DataFrame({"prediction": pred}).to_csv(os.path.join(pool_dir, "prediction_latest.csv"))
+    pd.DataFrame({"prediction": pred, "returns": ret_a}).to_csv(
+        os.path.join(pool_dir, "prediction_returns_latest.csv")
+    )
 
     ev = evaluate_factor_full(
         pred,

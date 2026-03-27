@@ -302,7 +302,6 @@ class AlphaEngine:
 					train_idx=self.train_idx,
 					test_idx=self.test_idx,
 					trainer=self.pool_batch_evaluator.trainer,
-					fragment_eval=getattr(ModelConfig, 'ALPHA_POOL_FRAGMENT_EVAL', True),
 					icir_missing_gamma=ModelConfig.ICIR_MISSING_GAMMA,
 					icir_missing_eps=ModelConfig.ICIR_MISSING_EPS,
 					bt=self.bt,

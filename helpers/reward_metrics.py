@@ -171,6 +171,8 @@ def performance_score_on_subset(
         return None
     if eval_mode == "fragment_ic":
         return float(abs(overall_ic))
+    if eval_mode != "full_weighted":
+        raise ValueError(f"Invalid eval_mode: {eval_mode!r}, expected 'fragment_ic' or 'full_weighted'")
     score, _, _ = eval_final_reward_from_ics(
         daily_ic, monthly_ic, overall_ic,
         icir_missing_gamma=icir_missing_gamma,

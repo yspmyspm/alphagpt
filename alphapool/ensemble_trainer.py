@@ -58,9 +58,12 @@ def build_full_prediction(
     common = common.intersection(returns.index)
     if len(common) == 0:
         return pd.Series(dtype=float)
+    w = np.asarray(weights, dtype=np.float64).ravel()
+    if w.shape[0] != len(factors):
+        raise ValueError(f"weights length {w.shape[0]} != num factors {len(factors)}")
     X = _build_design_matrix(factors, common)
-    pred = X @ np.asarray(weights, dtype=np.float64)
-    return pd.Series(pred, index=common)
+    pred = X @ w
+    return pd.Series(pred, index=common, name="prediction")
 
 
 class AbstractEnsembleTrainer(ABC):
