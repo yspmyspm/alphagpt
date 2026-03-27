@@ -122,6 +122,13 @@ def r_cor(
 	else:
 		_f2 = np.copy(f2)
 		_f2[~np.isfinite(_f2)] = 0
+
+	if np.dot(_f1, _f1) == 0:
+		return 0.0
+	if np.dot(_f2, _f2) == 0:
+		return 0.0
+	
+	
 	if weight is None:
 		return np.dot(_f1, _f2) / np.sqrt(np.dot(_f1, _f1) * np.dot(_f2, _f2))
 	else:

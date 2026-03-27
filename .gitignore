@@ -13,5 +13,6 @@ olhcv.feather
 returns/
 best_meme_strategy.json
 training_history.json
+runs/
 STOP_SIGNAL
 model_core.egg-info/

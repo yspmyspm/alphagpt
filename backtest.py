@@ -59,9 +59,9 @@ class AlphaBacktest:
         ic_score = overall_ic / (daily_std / 2 + monthly_std / 2 + 1e-8)
 
         score = 0
-        score += daily_icir * 0.3
-        score += monthly_icir * 0.3
-        score += ic_score * 0.4
+        score += abs(daily_icir) * 0.3
+        score += abs(monthly_icir) * 0.3
+        score += abs(ic_score) * 0.4
         return score, daily_icir, monthly_icir
 
     def evaluate(self, factor: pd.Series, returns: pd.Series):

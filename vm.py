@@ -75,6 +75,8 @@ class StackVM:
 
                     if res is None:
                         return None
+                    
+                    res.replace([np.inf, -np.inf, np.nan], 0, inplace=True)
                     stack.append(res)
                 else:
                     return None
