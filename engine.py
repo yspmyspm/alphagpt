@@ -13,7 +13,17 @@ from alphagpt import AlphaGPT, NewtonSchulzLowRankDecay, StableRankMonitor
 from vm import StackVM
 from backtest import AlphaBacktest
 from factors import FeatureEngineer
-from helpers.eval_worker import eval_single_formula, _init_worker
+from helpers.eval_worker import (
+	eval_single_formula,
+	_init_worker,
+	eval_formula_for_pool,
+	_init_worker_pool,
+)
+from alphapool.time_split import train_test_index_split
+from alphapool.pool_state import AlphaPoolState
+from alphapool.batch_evaluator import AlphaPoolBatchEvaluator
+from alphapool.ensemble_trainer import LinearMeanStdEnsembleTrainer
+from alphapool.pool_monitor import update_pool_monitoring
 
 
 class AlphaEngine:
@@ -56,6 +66,25 @@ class AlphaEngine:
 			penalty=getattr(ModelConfig, 'BACKTEST_PENALTY', -5.0),
 			use_smooth_reward=getattr(ModelConfig, 'USE_SMOOTH_REWARD', True),
 		)
+
+		self.train_idx, self.test_idx = train_test_index_split(
+			self.loader.returns.index,
+			train_years=getattr(ModelConfig, 'ALPHA_TRAIN_YEARS', 2.0),
+		)
+		self.alpha_pool = AlphaPoolState(capacity=getattr(ModelConfig, 'ALPHA_POOL_SIZE', 32))
+		self.pool_batch_evaluator = AlphaPoolBatchEvaluator(
+			returns=self.loader.returns,
+			train_idx=self.train_idx,
+			test_idx=self.test_idx,
+			pool=self.alpha_pool,
+			trainer=LinearMeanStdEnsembleTrainer(),
+			icir_missing_gamma=ModelConfig.ICIR_MISSING_GAMMA,
+			icir_missing_eps=ModelConfig.ICIR_MISSING_EPS,
+			missing_threshold=getattr(ModelConfig, 'ALPHA_MISSING_THRESHOLD', 0.3),
+			unfinished_penalty=getattr(ModelConfig, 'UNFINISHED_PENALTY', -5.0),
+			fragment_eval=getattr(ModelConfig, 'ALPHA_POOL_FRAGMENT_EVAL', True),
+		)
+		self.pool_metrics_history: list = []
 
 		self.best_score = -float('inf')
 		self.best_formula = None
@@ -250,34 +279,91 @@ class AlphaEngine:
 		if not formulas:
 			return
 
-		initargs = (
-			self.loader.features,
-			self.loader.returns,
-			FeatureEngineer.INPUT_DIM,
-			self.bt.use_smooth_reward,
-		)
-		with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker, initargs=initargs) as ex:
-			batch_rows = []
-			for idx, result in zip(eval_indices, ex.map(eval_single_formula, formulas)):
-				reward, score, daily_icir, monthly_icir, overall_ic, s_finite, s_dist, s_halflife, compliance, formula = result
-				rewards[idx] = reward
-				batch_rows.append((score, daily_icir, monthly_icir, overall_ic, s_finite, s_dist, s_halflife, compliance, formula))
+		use_pool = getattr(ModelConfig, 'USE_ALPHA_POOL', True)
 
-			round_best = max(batch_rows, key=lambda r: r[0])
-			rs, d_icir, m_icir, o_ic, s_fin, s_di, s_hl, comp, f_best = round_best
-			tqdm.write(
-				f"{c_round}[Round best] Score {rs:.3f} | Daily ICIR {d_icir:.3f} | Monthly ICIR {m_icir:.3f} | Overall IC {o_ic:.3f} | "
-				f"S_Finite {s_fin:.3f} | S_Dist {s_di:.3f} | S_Halflife {s_hl:.3f} | Compliance {comp:.3f} | Formula {self._formula_to_str(f_best)}{c_reset}"
+		if use_pool:
+			initargs = (
+				self.loader.features,
+				self.loader.returns,
+				FeatureEngineer.INPUT_DIM,
+				self.bt.use_smooth_reward,
+				getattr(ModelConfig, 'ALPHA_MISSING_THRESHOLD', 0.3),
 			)
-			if rs > self.best_score:
-				self.best_score = rs
-				self.best_formula = f_best
+			with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker_pool, initargs=initargs) as ex:
+				pool_results = list(ex.map(eval_formula_for_pool, formulas))
+			self.pool_batch_evaluator.run_batch(pool_results, eval_indices, rewards)
+
+			if self.run_dir is not None:
+				update_pool_monitoring(
+					step=step,
+					run_dir=self.run_dir,
+					pool=self.alpha_pool,
+					returns=self.loader.returns,
+					train_idx=self.train_idx,
+					test_idx=self.test_idx,
+					trainer=self.pool_batch_evaluator.trainer,
+					fragment_eval=getattr(ModelConfig, 'ALPHA_POOL_FRAGMENT_EVAL', True),
+					icir_missing_gamma=ModelConfig.ICIR_MISSING_GAMMA,
+					icir_missing_eps=ModelConfig.ICIR_MISSING_EPS,
+					bt=self.bt,
+					history=self.pool_metrics_history,
+				)
+
+			batch_rows = []
+			for local_i, r in enumerate(pool_results):
+				idx = eval_indices[local_i]
+				sc = float(rewards[idx].item())
+				ts = r.get('_test_score', 0.0) if isinstance(r, dict) else 0.0
+				mc = r.get('_max_corr', 0.0) if isinstance(r, dict) else 0.0
+				comp = r.get('compliance', 0.0) if isinstance(r, dict) else 0.0
+				batch_rows.append((sc, ts, mc, comp, formulas[local_i]))
+
+			if batch_rows:
+				round_best = max(batch_rows, key=lambda x: x[0])
+				rs, ts, mc, comp, f_best = round_best
 				tqdm.write(
-					f"{c_new}[!] New King: Score {rs:.3f} | Daily ICIR {d_icir:.3f} | Monthly ICIR {m_icir:.3f} | Overall IC {o_ic:.3f} | "
+					f"{c_round}[Round best] Score {rs:.3f} | TestPerf {ts:.3f} | MaxCorr {mc:.3f} | "
+					f"Compliance {comp:.3f} | Pool {len(self.alpha_pool.entries)} | "
+					f"Formula {self._formula_to_str(f_best)}{c_reset}"
+				)
+				if rs > self.best_score:
+					self.best_score = rs
+					self.best_formula = f_best
+					tqdm.write(
+						f"{c_new}[!] New King: Score {rs:.3f} | TestPerf {ts:.3f} | MaxCorr {mc:.3f} | "
+						f"Compliance {comp:.3f} | Formula {self._formula_to_str(f_best)}{c_reset}"
+					)
+					p = self.save_checkpoint(step=step, tag="best")
+					tqdm.write(f"  (saved checkpoint: {p})")
+		else:
+			initargs = (
+				self.loader.features,
+				self.loader.returns,
+				FeatureEngineer.INPUT_DIM,
+				self.bt.use_smooth_reward,
+			)
+			with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker, initargs=initargs) as ex:
+				batch_rows = []
+				for idx, result in zip(eval_indices, ex.map(eval_single_formula, formulas)):
+					reward, score, daily_icir, monthly_icir, overall_ic, s_finite, s_dist, s_halflife, compliance, formula = result
+					rewards[idx] = reward
+					batch_rows.append((score, daily_icir, monthly_icir, overall_ic, s_finite, s_dist, s_halflife, compliance, formula))
+
+				round_best = max(batch_rows, key=lambda r: r[0])
+				rs, d_icir, m_icir, o_ic, s_fin, s_di, s_hl, comp, f_best = round_best
+				tqdm.write(
+					f"{c_round}[Round best] Score {rs:.3f} | Daily ICIR {d_icir:.3f} | Monthly ICIR {m_icir:.3f} | Overall IC {o_ic:.3f} | "
 					f"S_Finite {s_fin:.3f} | S_Dist {s_di:.3f} | S_Halflife {s_hl:.3f} | Compliance {comp:.3f} | Formula {self._formula_to_str(f_best)}{c_reset}"
 				)
-				p = self.save_checkpoint(step=step, tag="best")
-				tqdm.write(f"  (saved checkpoint: {p})")
+				if rs > self.best_score:
+					self.best_score = rs
+					self.best_formula = f_best
+					tqdm.write(
+						f"{c_new}[!] New King: Score {rs:.3f} | Daily ICIR {d_icir:.3f} | Monthly ICIR {m_icir:.3f} | Overall IC {o_ic:.3f} | "
+						f"S_Finite {s_fin:.3f} | S_Dist {s_di:.3f} | S_Halflife {s_hl:.3f} | Compliance {comp:.3f} | Formula {self._formula_to_str(f_best)}{c_reset}"
+					)
+					p = self.save_checkpoint(step=step, tag="best")
+					tqdm.write(f"  (saved checkpoint: {p})")
 
 	def _policy_gradient_step(self, log_probs, rewards: torch.Tensor):
 		adv = (rewards - rewards.mean()) / (rewards.std() + 1e-5)

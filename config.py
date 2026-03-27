@@ -42,6 +42,11 @@ def _defaults() -> dict:
         "eval_num_workers": max(1, (os.cpu_count() or 4) - 1),
         "logging_dir": "runs",
         "save_checkpoint_every": 100,
+        "use_alpha_pool": True,
+        "alpha_pool_size": 32,
+        "alpha_train_years": 2.0,
+        "alpha_missing_threshold": 0.3,
+        "alpha_pool_fragment_eval": True,
     }
 
 
@@ -95,6 +100,12 @@ def install_config() -> None:
     )
     ModelConfig.LOGGING_DIR = m["logging_dir"]
     ModelConfig.SAVE_CHECKPOINT_EVERY = int(m["save_checkpoint_every"])
+
+    ModelConfig.USE_ALPHA_POOL = bool(m.get("use_alpha_pool", True))
+    ModelConfig.ALPHA_POOL_SIZE = int(m.get("alpha_pool_size", 32))
+    ModelConfig.ALPHA_TRAIN_YEARS = float(m.get("alpha_train_years", 2.0))
+    ModelConfig.ALPHA_MISSING_THRESHOLD = float(m.get("alpha_missing_threshold", 0.3))
+    ModelConfig.ALPHA_POOL_FRAGMENT_EVAL = bool(m.get("alpha_pool_fragment_eval", True))
 
     ModelConfig.INPUT_DIM = None
 
