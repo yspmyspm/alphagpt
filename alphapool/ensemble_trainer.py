@@ -1,5 +1,5 @@
 """
-线性因子池权重训练（MeanStd 风格：在训练段优化目标，在测试段用 eval_final_reward 打分）。
+线性因子池权重训练（MeanStd 风格：在全体数据上优化目标）。
 未来可继承 AbstractEnsembleTrainer 换为 LGBM + importance。
 """
 from __future__ import annotations
@@ -37,8 +37,7 @@ def _build_design_matrix(factors: List[pd.Series], index: pd.Index) -> np.ndarra
 @dataclass
 class EnsembleFitResult:
     weights: np.ndarray
-    train_score: Optional[float]
-    test_score: Optional[float]
+    score: Optional[float]
 
 
 def build_full_prediction(
@@ -71,20 +70,17 @@ class AbstractEnsembleTrainer(ABC):
         self,
         factors: List[pd.Series],
         returns: pd.Series,
-        train_idx: pd.Index,
-        test_idx: pd.Index,
+        data_idx: pd.Index,
         *,
         icir_missing_gamma: float,
         icir_missing_eps: float,
-        fragment_eval: bool = True,
     ) -> EnsembleFitResult:
         ...
 
 
 class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
     """
-    在训练段用 softmax 参数化权重，最小化「负的 performance_score」（与 eval_final_reward 一致）。
-    测试段用同样指标评估组合预测。
+    在全体数据上用 softmax 参数化权重，最小化「负的 performance_score」（与 eval_final_reward 一致）。
     """
 
     def __init__(self, maxiter: int = 400):
@@ -94,30 +90,25 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         self,
         factors: List[pd.Series],
         returns: pd.Series,
-        train_idx: pd.Index,
-        test_idx: pd.Index,
+        data_idx: pd.Index,
         *,
         icir_missing_gamma: float,
         icir_missing_eps: float,
-        fragment_eval: bool = True,
     ) -> EnsembleFitResult:
-
-
         n = len(factors)
-        X_tr = _build_design_matrix(factors, train_idx)
-        r_tr = returns.reindex(train_idx).values.astype(np.float64)
-        r_tr = np.nan_to_num(r_tr, nan=0.0, posinf=0.0, neginf=0.0)
-
+        X = _build_design_matrix(factors, data_idx)
+        r = returns.reindex(data_idx).values.astype(np.float64)
+        r = np.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
 
         def objective(u: np.ndarray) -> float:
             w = _softmax(u)
-            pred = X_tr @ w
-            factor_s = pd.Series(pred, index=train_idx)
-            ret_s = pd.Series(r_tr, index=train_idx)
+            pred = X @ w
+            factor_s = pd.Series(pred, index=data_idx)
+            ret_s = pd.Series(r, index=data_idx)
             sc = performance_score_on_subset(
                 factor_s,
                 ret_s,
-                train_idx,
+                data_idx,
                 icir_missing_gamma=icir_missing_gamma,
                 icir_missing_eps=icir_missing_eps,
                 eval_mode="full_weighted",
@@ -126,10 +117,10 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
 
         u0 = np.zeros(n)
         res = minimize(objective, u0, method="L-BFGS-B", options={"maxiter": self.maxiter})
-        w_opt = _softmax(res.x) if res.success else np.ones(n) / n
+        w_opt = _softmax(res.x)
         return self._pack_result(
-            w_opt, factors, returns, train_idx, test_idx,
-            icir_missing_gamma, icir_missing_eps, "full_weighted",
+            w_opt, factors, returns, data_idx,
+            icir_missing_gamma, icir_missing_eps,
         )
 
     def _pack_result(
@@ -137,33 +128,19 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         w: np.ndarray,
         factors: List[pd.Series],
         returns: pd.Series,
-        train_idx: pd.Index,
-        test_idx: pd.Index,
+        data_idx: pd.Index,
         icir_missing_gamma: float,
         icir_missing_eps: float,
-        eval_mode: str,
     ) -> EnsembleFitResult:
-        X_tr = _build_design_matrix(factors, train_idx)
-        X_te = _build_design_matrix(factors, test_idx)
-        r_tr = returns.reindex(train_idx).values.astype(np.float64)
-        r_te = returns.reindex(test_idx).values.astype(np.float64)
-        r_tr = np.nan_to_num(r_tr, nan=0.0)
-        r_te = np.nan_to_num(r_te, nan=0.0)
-
-        pred_tr = X_tr @ w
-        pred_te = X_te @ w
-        tr_s = pd.Series(pred_tr, index=train_idx)
-        te_s = pd.Series(pred_te, index=test_idx)
-        train_sc = performance_score_on_subset(
-            tr_s, pd.Series(r_tr, index=train_idx), train_idx,
+        X = _build_design_matrix(factors, data_idx)
+        r = returns.reindex(data_idx).values.astype(np.float64)
+        r = np.nan_to_num(r, nan=0.0)
+        pred = X @ w
+        s = pd.Series(pred, index=data_idx)
+        sc = performance_score_on_subset(
+            s, pd.Series(r, index=data_idx), data_idx,
             icir_missing_gamma=icir_missing_gamma,
             icir_missing_eps=icir_missing_eps,
-            eval_mode=eval_mode,
+            eval_mode="full_weighted",
         )
-        test_sc = performance_score_on_subset(
-            te_s, pd.Series(r_te, index=test_idx), test_idx,
-            icir_missing_gamma=icir_missing_gamma,
-            icir_missing_eps=icir_missing_eps,
-            eval_mode=eval_mode,
-        )
-        return EnsembleFitResult(weights=w, train_score=train_sc, test_score=test_sc)
+        return EnsembleFitResult(weights=w, score=sc)

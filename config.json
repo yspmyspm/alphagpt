@@ -1,8 +1,9 @@
 {
   "runtime": {
     "device": "auto",
-    "eval_num_workers": 0,
-    "logging_dir": "runs"
+    "eval_num_workers": 1,
+    "logging_dir": "runs",
+    "mp_start_method": "spawn"
   },
   "data": {
     "feather_path": "data/olhcv.feather",
@@ -14,26 +15,65 @@
   "training": {
     "batch_size": 10,
     "train_steps": 1000,
-    "save_checkpoint_every": 100
+    "save_checkpoint_every": 100,
+    "optimizer_lr": 1e-3
+  },
+  "resume": {
+    "resume_model_checkpoint": null,
+    "resume_alpha_pool_path": null
   },
   "model": {
-    "max_formula_len": 12,
+    "max_formula_len": 40,
     "gen_temperature": 1.0,
-    "ts_parameters": [1, 5, 10, 30, 60, 120, 1440]
+    "ts_parameters": [1, 5, 10, 30, 60, 120, 1440],
+    "max_decode_stack_size": 4
+  },
+  "model_architecture": {
+    "d_model": 64,
+    "nhead": 4,
+    "num_layers": 2,
+    "dim_feedforward": 128,
+    "num_loops": 3,
+    "dropout": 0.1,
+    "mtp_num_tasks": 3
+  },
+  "regularization": {
+    "use_lord_regularization": false,
+    "lord_decay_rate": 1e-3,
+    "lord_num_iterations": 5,
+    "lord_decay_keywords": ["q_proj", "k_proj", "attention", "qk_norm"],
+    "lord_rank_monitor_keywords": ["q_proj", "k_proj"],
+    "lord_rank_log_every": 100
   },
   "scoring": {
     "use_smooth_reward": true,
     "backtest_penalty": -5.0,
-    "unfinished_penalty": -5.0,
-    "icir_missing_gamma": 2.0,
-    "icir_missing_eps": 1e-6
+    "no_eos_penalty": -5.0,
+    "execute_fail_penalty": -5.0,
+    "missing_high_penalty": -5.0,
+    "low_std_penalty_base": -2.0,
+    "low_std_threshold": 1e-4,
+    "compliance_fail_penalty": -5.0,
+    "icir_missing_gamma": 1.5,
+    "icir_missing_eps": 1e-6,
+    "reward_weight_daily_icir": 0.3,
+    "reward_weight_monthly_icir": 0.3,
+    "reward_weight_ic_score": 0.4
+  },
+  "compliance": {
+    "distribution_check_skew_limit": 10.0,
+    "distribution_check_kurt_limit": 100.0,
+    "score_finite_min_ratio": 0.95,
+    "score_distribution_skew_limit": 40.0,
+    "score_distribution_kurt_limit": 1000.0,
+    "score_halflife_min_corr": 0.5,
+    "halflife_lag": 5
   },
   "alpha_pool": {
     "use_alpha_pool": true,
     "alpha_pool_size": 32,
-    "alpha_train_years": 2.0,
     "alpha_missing_threshold": 0.3,
-    "alpha_pool_fragment_eval": false,
+    "alpha_max_corr_min_points": 10,
     "ensemble_maxiter": 10
   }
 }

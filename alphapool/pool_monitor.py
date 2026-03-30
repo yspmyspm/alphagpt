@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from alphapool.ensemble_trainer import build_full_prediction, LinearMeanStdEnsembleTrainer
+from alphapool.pool_feature_logging import save_pool_feature_snapshot
 from alphapool.pool_state import AlphaPoolState
 from backtest import AlphaBacktest
 from helpers.reward_metrics import evaluate_factor_full, metrics_from_factor_returns_full
@@ -73,38 +74,42 @@ def update_pool_monitoring(
     run_dir: str,
     pool: AlphaPoolState,
     returns: pd.Series,
-    train_idx: pd.Index,
-    test_idx: pd.Index,
+    data_idx: pd.Index,
     trainer: LinearMeanStdEnsembleTrainer,
     *,
     icir_missing_gamma: float,
     icir_missing_eps: float,
     bt: AlphaBacktest,
     history: List[Dict[str, Any]],
+    formula_to_str: Optional[Callable[[List[int]], str]] = None,
 ) -> None:
     """
-    用当前 pool 在 train/test 划分下拟合权重，生成全时段线性预测；
-    在全样本上与 returns 对齐后，用完整 evaluate（含 compliance）与 IC 分解指标记录并落盘。
-
-    注意：此处拟合权重固定使用 fragment_eval=False（与 eval_final_reward / 全样本曲线一致）。
-    batch 内 RL reward 仍由 AlphaPoolBatchEvaluator 的 fragment_eval 配置单独控制。
+    用当前 pool 在全体数据上拟合权重，生成全时段线性预测；
+    与 returns 对齐后，用完整 evaluate（含 compliance）与 IC 分解指标记录并落盘。
     """
     factors = pool.factor_series_list()
     pool_dir = os.path.join(run_dir, "pool_artifacts")
     os.makedirs(pool_dir, exist_ok=True)
 
-    if not factors or len(train_idx) == 0 or len(test_idx) == 0:
+    if not factors or len(data_idx) == 0:
         return
 
     fit = trainer.gfit(
         factors,
         returns,
-        train_idx,
-        test_idx,
+        data_idx,
         icir_missing_gamma=icir_missing_gamma,
         icir_missing_eps=icir_missing_eps,
-        fragment_eval=False,
     )
+    if formula_to_str is not None and pool.entries:
+        save_pool_feature_snapshot(
+            run_dir,
+            step,
+            pool.entries,
+            formula_to_str,
+            returns,
+            weights=fit.weights,
+        )
     pred = build_full_prediction(factors, returns, fit.weights)
     if len(pred) == 0:
         return
@@ -120,6 +125,10 @@ def update_pool_monitoring(
     if m is None:
         return
 
+    pred_step_path = os.path.join(pool_dir, f"prediction_step_{step:06d}.csv")
+    pred_ret_step_path = os.path.join(pool_dir, f"prediction_returns_step_{step:06d}.csv")
+    pd.DataFrame({"prediction": pred}).to_csv(pred_step_path)
+    pd.DataFrame({"prediction": pred, "returns": ret_a}).to_csv(pred_ret_step_path)
     pd.DataFrame({"prediction": pred}).to_csv(os.path.join(pool_dir, "prediction_latest.csv"))
     pd.DataFrame({"prediction": pred, "returns": ret_a}).to_csv(
         os.path.join(pool_dir, "prediction_returns_latest.csv")

@@ -8,36 +8,53 @@ from vm import StackVM
 from backtest import AlphaBacktest
 from helpers.reward_metrics import compute_compliance_only, missing_ratio_on_common
 
-# 每个 worker 进程内的全局数据，由 _init_worker 设置
 _worker_features = None
 _worker_returns = None
 _worker_vm = None
 _worker_bt = None
 
-# alphapool 并行阶段
 _worker_missing_threshold = 0.3
 _worker_use_smooth = True
+_worker_execute_fail_penalty = -5.0
+_worker_low_std_penalty_base = -2.0
+_worker_low_std_threshold = 1e-4
 
 
-def _init_worker(features, returns, input_dim, use_smooth_reward):
+def _init_worker(features, returns, input_dim, use_smooth_reward,
+                 execute_fail_penalty=-5.0, low_std_penalty_base=-2.0, low_std_threshold=1e-4):
     """每个 worker 启动时调用一次，预加载数据避免重复序列化。"""
     global _worker_features, _worker_returns, _worker_vm, _worker_bt
+    global _worker_execute_fail_penalty, _worker_low_std_penalty_base, _worker_low_std_threshold
     _worker_features = features
     _worker_returns = returns
     FeatureEngineer.INPUT_DIM = input_dim
     _worker_vm = StackVM()
     _worker_bt = AlphaBacktest(use_smooth_reward=use_smooth_reward)
+    _worker_execute_fail_penalty = float(execute_fail_penalty)
+    _worker_low_std_penalty_base = float(low_std_penalty_base)
+    _worker_low_std_threshold = float(low_std_threshold)
 
 
-def _init_worker_pool(features, returns, input_dim, use_smooth_reward, missing_threshold):
+def _init_worker_pool(
+    features,
+    returns,
+    input_dim,
+    use_smooth_reward,
+    missing_threshold,
+    low_std_threshold=1e-4,
+    low_std_penalty_base=-2.0,
+):
     """alphapool：仅 VM + 数据 + 缺失阈值；合规在 reward_metrics 中算。"""
     global _worker_features, _worker_returns, _worker_vm, _worker_missing_threshold, _worker_use_smooth
+    global _worker_low_std_threshold, _worker_low_std_penalty_base
     _worker_features = features
     _worker_returns = returns
     FeatureEngineer.INPUT_DIM = input_dim
     _worker_vm = StackVM()
     _worker_missing_threshold = float(missing_threshold)
     _worker_use_smooth = bool(use_smooth_reward)
+    _worker_low_std_threshold = float(low_std_threshold)
+    _worker_low_std_penalty_base = float(low_std_penalty_base)
 
 
 def eval_single_formula(formula):
@@ -47,11 +64,12 @@ def eval_single_formula(formula):
     """
     res = _worker_vm.execute(formula, _worker_features)
     if res is None:
-        return (-5.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, formula)
+        p = _worker_execute_fail_penalty
+        return (p, p, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, formula)
     std_val = res.std()
-    if std_val < 1e-4:
-        ratio = min(1.0, std_val / 1e-4)
-        reward = -2.0 * (1.0 - ratio)
+    if std_val < _worker_low_std_threshold:
+        ratio = min(1.0, std_val / _worker_low_std_threshold)
+        reward = _worker_low_std_penalty_base * (1.0 - ratio)
         return (reward, reward, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, formula)
     out = _worker_bt.evaluate(res, _worker_returns)
     reward = float(out[1])
@@ -81,9 +99,9 @@ def eval_formula_for_pool(formula):
 
     std_val = res.std()
 
-    if std_val < 1e-4:
-        ratio = min(1.0, std_val / 1e-4)
-        reward = -2.0 * (1.0 - ratio)
+    if std_val < _worker_low_std_threshold:
+        ratio = min(1.0, std_val / _worker_low_std_threshold)
+        reward = _worker_low_std_penalty_base * (1.0 - ratio)
         return {"ok": True, "low_std": True, "reward": reward, "formula": formula}
     
 

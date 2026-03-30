@@ -1,0 +1,12 @@
+{
+  "compliance": {
+    "distribution_check_skew_limit": 10.0,
+    "distribution_check_kurt_limit": 100.0,
+    "score_finite_min_ratio": 0.95,
+    "score_distribution_skew_limit": 40.0,
+    "score_distribution_kurt_limit": 1000.0,
+    "score_halflife_min_corr": 0.5,
+    "halflife_lag": 5
+  }
+}
+

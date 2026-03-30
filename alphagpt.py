@@ -222,7 +222,7 @@ class LoopedTransformer(nn.Module):
 class AlphaGPT(nn.Module):
     def __init__(self):
         super().__init__()
-        self.d_model = 64
+        self.d_model = int(ModelConfig.MODEL_D_MODEL)
         # 与 FeatureEngineer.INPUT_DIM 对齐的占位特征 token
         self.features_list = [f"F{i}" for i in range(FeatureEngineer.INPUT_DIM)]
         self.ts_parameters = get_ts_parameters()
@@ -246,18 +246,22 @@ class AlphaGPT(nn.Module):
         # Enhanced Transformer with Looped Transformer
         self.blocks = LoopedTransformer(
             d_model=self.d_model,
-            nhead=4,
-            num_layers=2,
-            dim_feedforward=128,
-            num_loops=3,
-            dropout=0.1
+            nhead=int(ModelConfig.MODEL_NHEAD),
+            num_layers=int(ModelConfig.MODEL_NUM_LAYERS),
+            dim_feedforward=int(ModelConfig.MODEL_DIM_FEEDFORWARD),
+            num_loops=int(ModelConfig.MODEL_NUM_LOOPS),
+            dropout=float(ModelConfig.MODEL_DROPOUT),
         )
         
         # RMSNorm instead of LayerNorm
         self.ln_f = RMSNorm(self.d_model)
         
         # MTPHead for multi-task output
-        self.mtp_head = MTPHead(self.d_model, self.vocab_size, num_tasks=3)
+        self.mtp_head = MTPHead(
+            self.d_model,
+            self.vocab_size,
+            num_tasks=int(ModelConfig.MODEL_MTP_NUM_TASKS),
+        )
         self.head_critic = nn.Linear(self.d_model, 1)
 
     def forward(self, idx):

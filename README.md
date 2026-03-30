@@ -1,61 +1,191 @@
-AlphaGPT 仓库速读
+# AlphaGPT
 
-这是一套“因子挖掘 + 实盘执行”的加密量化系统，核心思路是：用模型自动生成可解释的因子公式，通过回测打分筛选，再把高分公式用于实时扫描与交易执行。整体偏向 Solana meme 生态的数据与交易链路。
+基于强化学习的可解释 alpha 表达式生成系统。  
+核心流程是：`生成表达式 -> 执行成因子 -> 回测打分 -> 更新生成模型`，并可维护一个持续优化的 `alpha pool`。
 
-代码组织（按功能划分）
-- data_pipeline/：数据管线。拉取 Birdeye/DexScreener 的代币与 OHLCV，写入 Postgres/Timescale。
-- model_core/：策略挖掘。把原始行情转成特征（factors），定义算子语言（ops），用 Transformer 生成“公式 token 序列”，再用回测评分训练。
-- strategy_manager/：实盘策略执行。周期性加载数据、生成信号、风控、下单与持仓管理。
-- execution/：交易执行层。封装 Solana RPC + Jupiter 聚合器的报价/下单/签名。
-- dashboard/：Streamlit 看板，展示持仓、市场快照与日志。
-- paper/、lord/、times.py：研究材料或独立实验脚本（不直接参与主流程）。
+详细算法文档见 [docs/algorithm_pipeline.md](docs/algorithm_pipeline.md)。
 
-主流程（从数据到实盘）
-1) data_pipeline 抓取链上/行情数据并入库
-2) model_core 训练生成最优公式（best_meme_strategy.json）
-3) strategy_manager 读取公式，对 Top N 代币打分
-4) risk 过滤流动性等风险，execution 完成交易
-5) portfolio 持仓落地到本地 JSON，dashboard 展示
+## 特性
 
-核心思想
-- 不是直接预测价格，而是“生成公式→解释执行→回测评分→优化生成器”。
-- 公式 = token 序列；token 由“特征 + 算子”组成，StackVM 执行成因子信号。
-- 交易层只消费最终信号分数，负责风控与执行。
+- RPN 表达式生成，带严格约束解码（类型栈合法性 + 可收敛约束 + 最大栈深约束）。
+- EOS 即时异步评估：短表达式先结束先评测，不阻塞后续样本。
+- IC/ICIR + 合规性（finite/distribution/halflife）联合奖励。
+- Alpha pool 联合更新：候选去冗余、组合权重优化、容量裁剪。
+- 完整 checkpoint 与 resume：
+  - 可从模型 checkpoint 恢复；
+  - 可单独指定 alpha pool 快照覆盖恢复。
 
-当前因子与算子一览
-- 主流程因子（FeatureEngineer，6 个）
-  - ret：对数收益
-  - liq_score：流动性/FDV 健康度
-  - pressure：买卖力量不平衡
-  - fomo：成交量加速度
-  - dev：价格偏离均值
-  - log_vol：对数成交量
-- 扩展因子（AdvancedFactorEngineer，12 个）
-  - ret：对数收益
-  - liq_score：流动性/FDV 健康度
-  - pressure：买卖力量不平衡
-  - fomo：成交量加速度
-  - dev：价格偏离均值
-  - log_vol：对数成交量
-  - vol_cluster：波动率聚集
-  - momentum_rev：动量反转
-  - rel_strength：相对强弱（RSI 类）
-  - hl_range：高低价振幅
-  - close_pos：收盘在区间位置
-  - vol_trend：成交量趋势
-- 算子（SeriesOps，13 个，pd.Series 向量化）
-  - add/sub/mul/div：四则运算
-  - neg/abs_/sign：一元
-  - gate：门控选择（condition>0 选 x，否则 y）
-  - jump：极端跳变检测（zscore>3）
-  - decay：衰减叠加（t + 0.8*lag1 + 0.6*lag2）
-  - delay/delay1：滞后（delay 用 config.DELAY_PERIOD）
-  - max3：当前/滞后1/滞后2 最大值
+## 目录结构
 
-现状与依赖（实话版）
-- 需要外部服务：Postgres、Birdeye API、Solana RPC、Jupiter。
-- 缺少依赖清单与 .env 模板；实盘需要私钥配置。
-- best_meme_strategy.json 需要先训练生成，仓库默认不带。
+```text
+alphagpt/
+├─ engine.py                     # 训练主入口（rollout + 评估 + PG 更新）
+├─ utils/engine_base.py          # 保存/加载/checkpoint 等基础能力
+├─ alphagpt.py                   # 模型定义（LoopedTransformer + MTPHead）
+├─ vm.py                         # RPN Stack VM 执行器
+├─ backtest.py                   # 因子评估入口
+├─ data_loader.py                # Feather 数据加载
+├─ config.json                   # 主配置文件
+├─ config.py                     # 兼容层（转发到 configs/config.py）
+├─ configs/                      # 配置模块 + 可选子配置
+├─ helpers/
+│  ├─ eval_worker.py             # 多进程评估 worker
+│  ├─ reward_metrics.py          # IC/ICIR/compliance 计算
+│  └─ myops.py                   # 操作符注册
+└─ alphapool/
+   ├─ pool_state.py              # pool 状态与持久化
+   ├─ batch_evaluator.py         # batch reward + joint pool update
+   ├─ ensemble_trainer.py        # 组合权重优化（L-BFGS-B）
+   └─ pool_monitor.py            # pool 指标与产物监控
+```
 
-Takeaway（可对外复述）
-这不是一套“预测模型”，而是一个“自动写因子的系统”：它用 Transformer 生成公式，用回测奖励训练公式生成器，再把高分公式接入链上执行与风控。把“策略研究”和“交易执行”清晰分层，是它最值得借鉴的工程设计。
+## 环境要求
+
+- Python 3.10+（推荐 3.11）
+- Windows / Linux 均可（Windows 下使用 `spawn` 多进程启动）
+
+安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+## 数据准备
+
+默认读取：
+
+- 特征：`data/olhcv.feather`
+- 收益：`returns/30min.feather`
+
+要求：
+
+- 文件为 Feather 格式；
+- 若有 `_time` 列，会作为时间索引；
+- `returns` 文件需包含 `configs/config.json` 中 `returns_column` 指定的列（默认 `returns`）。
+
+## 快速开始
+
+1. 修改 `config.json`（至少确认数据路径和训练参数）。
+2. 直接训练：
+
+```bash
+python engine.py
+```
+
+3. 指定配置文件路径（可选）：
+
+```bash
+python engine.py --config config.json
+```
+
+4. 指定恢复模型 checkpoint：
+
+```bash
+python engine.py --resume-model-checkpoint runs/20260330_120000/checkpoints/latest.pt
+```
+
+5. 同时恢复模型 + 指定 pool（pool 会覆盖 checkpoint 内嵌 pool）：
+
+```bash
+python engine.py --resume-model-checkpoint runs/20260330_120000/checkpoints/latest.pt --resume-alpha-pool runs/20260330_120000/best_alpha_pool.pkl
+```
+
+## 配置说明（`config.json`）
+
+主要分组：
+
+- `runtime`
+  - `device`: `auto/cpu/cuda`
+  - `eval_num_workers`: 评估进程数（`<=0` 时自动按 CPU 推断）
+  - `logging_dir`: run 输出目录
+  - `mp_start_method`: 多进程启动方式（默认 `spawn`）
+- `data`
+  - `feather_path`, `returns_dir`, `returns_filename`, `returns_column`, `feature_columns`
+- `training`
+  - `batch_size`, `train_steps`, `save_checkpoint_every`, `optimizer_lr`
+- `resume`
+  - `resume_model_checkpoint`, `resume_alpha_pool_path`
+- `model`
+  - `max_formula_len`, `gen_temperature`, `ts_parameters`, `max_decode_stack_size`
+- `model_architecture`
+  - `d_model`, `nhead`, `num_layers`, `dim_feedforward`, `num_loops`, `dropout`, `mtp_num_tasks`
+- `compliance`
+  - `distribution_check_skew_limit`, `distribution_check_kurt_limit`
+  - `score_finite_min_ratio`, `score_distribution_skew_limit`, `score_distribution_kurt_limit`
+  - `score_halflife_min_corr`, `halflife_lag`
+- `regularization`
+  - `use_lord_regularization`, `lord_decay_rate`, `lord_num_iterations`
+  - `lord_decay_keywords`, `lord_rank_monitor_keywords`, `lord_rank_log_every`
+- `scoring`
+  - `no_eos_penalty`, `execute_fail_penalty`, `missing_high_penalty`, `low_std_penalty_base`, `low_std_threshold`, `compliance_fail_penalty`
+  - `use_smooth_reward`, `backtest_penalty`, `icir_missing_gamma`, `icir_missing_eps`
+  - `reward_weight_daily_icir`, `reward_weight_monthly_icir`, `reward_weight_ic_score`
+- `alpha_pool`
+  - `use_alpha_pool`, `alpha_pool_size`, `alpha_missing_threshold`, `alpha_max_corr_min_points`, `ensemble_maxiter`
+
+数值稳定性常量（如 `policy_advantage_eps`、`icir_std_eps` 等）已硬编码在 `ModelConfig` 类中，不再通过配置文件暴露。
+
+配置文件支持 `sub_config_paths` 字段，用于引用子配置文件（按路径深度合并）。
+例如可将 `model_architecture` 拆入 `configs/model_architecture.json`，在主配置中引用：
+
+```json
+{
+  "sub_config_paths": {
+    "arch": "configs/model_architecture.json"
+  }
+}
+```
+
+也可通过环境变量切换配置文件：
+
+```bash
+set CONFIG_PATH=C:\path\to\your_config.json
+python engine.py
+```
+
+## 训练产物
+
+每次训练会生成 `runs/<timestamp>/`，常见文件：
+
+- `config_snapshot.json`: 本次实际生效配置快照
+- `training_history.json`: step 级训练历史
+- `best_meme_strategy.json`: 当前 best 公式摘要
+- `vocab.json`: token 词表与 token id
+- `checkpoints/`
+  - `latest.pt`, `final.pt`, `best.pt`, `step_XXXXXX.pt`, `best_step_XXXXXX.pt`
+  - `alpha_pool/<tag>.pkl`（随 checkpoint 的 pool 快照）
+- `best_alpha_pool.pkl` + `best_alpha_pool_meta.json`
+- `pool_artifacts/`：组合预测与 pool 指标历史
+- `pool_features/`、`pool_features_removed/`：pool 入池/出池因子明细
+- `pool_ic_raw.png`、`pool_ic_abs.png`：pool 指标曲线
+
+## 训练流程摘要
+
+1. 加载特征与收益，构建词表与模型。
+2. 约束解码生成表达式 token 序列。
+3. 任意样本遇到 EOS 即提交异步评测。
+4. 计算奖励并（可选）联合更新 alpha pool。
+5. 用策略梯度更新模型。
+6. 持续记录指标，按步保存 checkpoint。
+
+详细过程和公式见 [docs/algorithm_pipeline.md](docs/algorithm_pipeline.md)。
+
+## 常见问题
+
+### 1. 为什么很多样本拿到 `no_eos_penalty`？
+
+通常是 `max_formula_len` 太小、操作符空间太大或约束太紧。优先检查：
+
+- `model.max_formula_len`
+- `model.max_decode_stack_size`
+- 操作符和参数规模（`helpers/myops.py`、`ts_parameters`）
+
+### 2. 如何只恢复模型不恢复 pool？
+
+只传 `--resume-model-checkpoint` 即可。  
+若还传了 `--resume-alpha-pool`，则会用该 pool 覆盖 checkpoint 内的 pool。
+
+### 3. Windows 多进程报错怎么办？
+
+从命令行直接运行 `python engine.py`。  
+不要在不支持 `spawn` 的交互环境里直接复用训练入口。

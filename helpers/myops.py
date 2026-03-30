@@ -369,7 +369,7 @@ def get_ops():
 
 
 def get_ts_parameters():
-    return [int(v) for v in getattr(ModelConfig, "TS_PARAMETERS", [1, 5, 10, 30, 60, 120, 1440])]
+    return [int(v) for v in ModelConfig.TS_PARAMETERS]
 
 
 """

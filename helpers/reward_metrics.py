@@ -72,8 +72,9 @@ def eval_final_reward_from_ics(
     """
     daily_std = daily_ic.std()
     monthly_std = monthly_ic.std()
-    daily_icir = daily_ic.mean() / daily_std if daily_std > 1e-8 else 0.0
-    monthly_icir = monthly_ic.mean() / monthly_std if monthly_std > 1e-8 else 0.0
+    std_eps = float(ModelConfig.ICIR_STD_EPS)
+    daily_icir = daily_ic.mean() / daily_std if daily_std > std_eps else 0.0
+    monthly_icir = monthly_ic.mean() / monthly_std if monthly_std > std_eps else 0.0
 
     daily_coverage = float(np.isfinite(daily_ic.to_numpy(dtype=np.float64)).mean()) if len(daily_ic) > 0 else 0.0
     monthly_coverage = float(np.isfinite(monthly_ic.to_numpy(dtype=np.float64)).mean()) if len(monthly_ic) > 0 else 0.0
@@ -81,10 +82,15 @@ def eval_final_reward_from_ics(
     daily_icir *= missing_penalty_factor(daily_coverage, icir_missing_gamma, icir_missing_eps)
     monthly_icir *= missing_penalty_factor(monthly_coverage, icir_missing_gamma, icir_missing_eps)
     # 分母为日度/月度 IC 序列标准差的几何平均（替代算术平均）
-    geom_std = float(np.sqrt(max(daily_std * monthly_std, 0.0) + 1e-16))
-    ic_score = overall_ic / (geom_std + 1e-8)
+    geom_eps = float(ModelConfig.GEOM_STD_EPS)
+    ic_div_eps = float(ModelConfig.IC_SCORE_DIV_EPS)
+    geom_std = float(np.sqrt(max(daily_std * monthly_std, 0.0) + geom_eps))
+    ic_score = overall_ic / (geom_std + ic_div_eps)
 
-    score = abs(daily_icir) * 0.3 + abs(monthly_icir) * 0.3 + abs(ic_score) * 0.4
+    w_daily = float(ModelConfig.REWARD_WEIGHT_DAILY_ICIR)
+    w_monthly = float(ModelConfig.REWARD_WEIGHT_MONTHLY_ICIR)
+    w_ic = float(ModelConfig.REWARD_WEIGHT_IC_SCORE)
+    score = abs(daily_icir) * w_daily + abs(monthly_icir) * w_monthly + abs(ic_score) * w_ic
     return score, daily_icir, monthly_icir
 
 

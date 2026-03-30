@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from config import ModelConfig
+
 def check_distribution(arr: np.ndarray) -> bool:
 	"""与 rl-mining toolkit 中的分布检查保持一致。"""
 	fv = arr.copy()
@@ -9,21 +11,34 @@ def check_distribution(arr: np.ndarray) -> bool:
 	kurt = pd.Series(fv).kurt()
 	if np.isnan(skew) or np.isnan(kurt):
 		return False
-	if abs(skew) > 10 or abs(kurt) > 100:
+	if (
+		abs(skew) > float(ModelConfig.DISTRIBUTION_CHECK_SKEW_LIMIT)
+		or abs(kurt) > float(ModelConfig.DISTRIBUTION_CHECK_KURT_LIMIT)
+	):
 		return False
 	if np.nanstd(fv) == 0:
 		return False
 	return True
 
 
-def score_finite_ratio(arr: np.ndarray, min_ratio: float = 0.95) -> float:
+def score_finite_ratio(arr: np.ndarray, min_ratio: float | None = None) -> float:
 	"""返回 [0, 1] 的有限值比例分数，1 表示完全通过。"""
+	if min_ratio is None:
+		min_ratio = float(ModelConfig.SCORE_FINITE_MIN_RATIO)
 	finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
 	return min(1.0, finite_ratio / min_ratio)
 
 
-def score_distribution(arr: np.ndarray, skew_limit: float = 40.0, kurt_limit: float = 1000.0) -> float:
+def score_distribution(
+	arr: np.ndarray,
+	skew_limit: float | None = None,
+	kurt_limit: float | None = None,
+) -> float:
 	"""返回 [0, 1] 的分布分数，1 表示完全通过。"""
+	if skew_limit is None:
+		skew_limit = float(ModelConfig.SCORE_DISTRIBUTION_SKEW_LIMIT)
+	if kurt_limit is None:
+		kurt_limit = float(ModelConfig.SCORE_DISTRIBUTION_KURT_LIMIT)
 	fv = arr.copy()
 	fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
 	skew = pd.Series(fv).skew()
@@ -38,10 +53,14 @@ def score_distribution(arr: np.ndarray, skew_limit: float = 40.0, kurt_limit: fl
 	return min(skew_score, kurt_score)
 
 
-def score_halflife(arr: np.ndarray, min_corr: float = 0.5) -> float:
+def score_halflife(arr: np.ndarray, min_corr: float | None = None, lag: int | None = None) -> float:
 	"""返回 [0, 1] 的半衰期分数，corr >= min_corr 得 1。"""
-	shifted = np.roll(arr, 5)
-	shifted[:5] = np.nan
+	if min_corr is None:
+		min_corr = float(ModelConfig.SCORE_HALFLIFE_MIN_CORR)
+	if lag is None:
+		lag = int(ModelConfig.HALFLIFE_LAG)
+	shifted = np.roll(arr, lag)
+	shifted[:lag] = np.nan
 	corr = finite_rcor(arr, shifted)
 	if np.isnan(corr) or np.isinf(corr):
 		return 0.0
@@ -49,15 +68,18 @@ def score_halflife(arr: np.ndarray, min_corr: float = 0.5) -> float:
 	return min(1.0, max(0.0, (corr + 1.0) / (min_corr + 1.0)))  # 从 -1 到 min_corr 线性映射到 [0,1]
 
 
-def check_finite_count(arr: np.ndarray, min_ratio: float = 0.95) -> bool:
+def check_finite_count(arr: np.ndarray, min_ratio: float | None = None) -> bool:
+	if min_ratio is None:
+		min_ratio = float(ModelConfig.SCORE_FINITE_MIN_RATIO)
 	finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
 	return finite_ratio >= min_ratio
 
 def check_halflife(arr: np.ndarray) -> float:
-	shifted = np.roll(arr, 5)
-	shifted[:5] = np.nan
+	lag = int(ModelConfig.HALFLIFE_LAG)
+	shifted = np.roll(arr, lag)
+	shifted[:lag] = np.nan
 	corr = finite_rcor(arr, shifted)
-	return corr >= 0.5
+	return corr >= float(ModelConfig.SCORE_HALFLIFE_MIN_CORR)
 
 def calc_monthlyic(df):
 	df.replace([np.inf, -np.inf, np.nan], 0, inplace=True)
@@ -87,9 +109,6 @@ def calc_monthlyic(df):
 def calc_dailyic(df):
 	df.replace([np.inf, -np.inf, np.nan], 0, inplace=True)
 	values = df[['factor', 'returns']].to_numpy(dtype=float)
-	print("factor", df['factor'].abs().max())
-	print("returns", df['returns'].abs().max())
-	print("factor * returns", (df['factor'] * df['returns']).abs().max())
 	f = values[:, 0]
 	r = values[:, 1]
 	day_codes = df.index.values.astype('datetime64[D]').astype('int64')

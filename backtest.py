@@ -19,11 +19,11 @@ class AlphaBacktest:
 
     def __init__(self, penalty=None, use_smooth_reward=True):
         if penalty is None:
-            penalty = getattr(ModelConfig, 'BACKTEST_PENALTY', -5.0)
+            penalty = ModelConfig.BACKTEST_PENALTY
         self.penalty = penalty
         self.use_smooth_reward = use_smooth_reward
-        self.icir_missing_gamma = float(getattr(ModelConfig, 'ICIR_MISSING_GAMMA', 2.0))
-        self.icir_missing_eps = float(getattr(ModelConfig, 'ICIR_MISSING_EPS', 1e-6))
+        self.icir_missing_gamma = float(ModelConfig.ICIR_MISSING_GAMMA)
+        self.icir_missing_eps = float(ModelConfig.ICIR_MISSING_EPS)
 
     def eval_final_reward(
         self,
