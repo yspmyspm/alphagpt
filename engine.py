@@ -528,24 +528,8 @@ if __name__ == "__main__":
 		default=None,
 		help="Path to config JSON file. Defaults to config.json in project root.",
 	)
-	parser.add_argument(
-		"--resume-model-checkpoint",
-		type=str,
-		default=None,
-		help="Optional checkpoint path to override config resume_model_checkpoint.",
-	)
-	parser.add_argument(
-		"--resume-alpha-pool",
-		type=str,
-		default=None,
-		help="Optional alpha pool path to override config resume_alpha_pool_path.",
-	)
 	args = parser.parse_args()
 	install_config(args.config)
-	if args.resume_model_checkpoint is not None:
-		ModelConfig.RESUME_MODEL_CHECKPOINT = args.resume_model_checkpoint
-	if args.resume_alpha_pool is not None:
-		ModelConfig.RESUME_ALPHA_POOL_PATH = args.resume_alpha_pool
 
 	import multiprocessing as mp
 	mp.set_start_method(ModelConfig.MP_START_METHOD)

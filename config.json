@@ -15,7 +15,7 @@
   "training": {
     "batch_size": 10,
     "train_steps": 1000,
-    "save_checkpoint_every": 100,
+    "save_checkpoint_every": 10,
     "optimizer_lr": 1e-3
   },
   "resume": {
@@ -71,7 +71,7 @@
   },
   "alpha_pool": {
     "use_alpha_pool": true,
-    "alpha_pool_size": 32,
+    "alpha_pool_size": 100,
     "alpha_missing_threshold": 0.3,
     "alpha_max_corr_min_points": 10,
     "ensemble_maxiter": 10
