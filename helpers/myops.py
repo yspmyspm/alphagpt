@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from config import ModelConfig
+from configs import ModelConfig
 
 from .ops_numba import ts_numba
 

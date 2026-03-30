@@ -19,33 +19,38 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 def _plot_factor_distribution(fv: np.ndarray, path_raw: str, path_clipped: str, title: str) -> None:
-    """每个因子画两张分布图：原始 + clip 到 q01-q99。"""
-    if len(fv) < 10:
+    """每个因子两张分布图：原始 + clip；样本过少或分位数退化时仍写出 clipped 一份（与 raw 同数据或注明）。"""
+
+    def _hist(data: np.ndarray, path: str, cap: str) -> None:
+        nb = min(1000, max(20, len(data) // 10)) if len(data) > 0 else 10
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.hist(data, bins=nb, density=True, alpha=0.7, edgecolor="none")
+        ax.set_title(cap, fontsize=9)
+        ax.set_xlabel("value")
+        ax.set_ylabel("density")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(path, dpi=100)
+        plt.close(fig)
+
+    if len(fv) == 0:
+        z = np.zeros(1)
+        _hist(z, path_raw, f"Distribution (raw, empty): {title}")
+        _hist(z, path_clipped, f"Distribution (clipped, empty): {title}")
         return
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(fv, bins=1000, density=True, alpha=0.7, edgecolor="none")
-    ax.set_title(f"Distribution (raw): {title}", fontsize=9)
-    ax.set_xlabel("value")
-    ax.set_ylabel("density")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path_raw, dpi=100)
-    plt.close(fig)
+    if len(fv) < 10:
+        _hist(fv, path_raw, f"Distribution (raw, n={len(fv)}): {title}")
+        _hist(fv, path_clipped, f"Distribution (clipped=same as raw, n={len(fv)}): {title}")
+        return
 
+    _hist(fv, path_raw, f"Distribution (raw): {title}")
     q01, q99 = np.percentile(fv, 1), np.percentile(fv, 99)
     if q01 >= q99:
+        _hist(fv, path_clipped, f"Distribution (clipped=same as raw, degenerate q01>=q99): {title}")
         return
     fv_c = np.clip(fv, q01, q99)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(fv_c, bins=1000, density=True, alpha=0.7, edgecolor="none")
-    ax.set_title(f"Distribution (q01\u2013q99): {title}", fontsize=9)
-    ax.set_xlabel("value")
-    ax.set_ylabel("density")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(path_clipped, dpi=100)
-    plt.close(fig)
+    _hist(fv_c, path_clipped, f"Distribution (q01\u2013q99): {title}")
 
 
 def _factor_stats(factor: pd.Series, returns: pd.Series) -> Dict[str, Any]:

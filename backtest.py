@@ -1,7 +1,7 @@
 import pandas as pd
 import torch
 
-from config import ModelConfig
+from configs import ModelConfig
 from helpers.reward_metrics import (
     eval_final_reward_from_ics,
     evaluate_factor_full,

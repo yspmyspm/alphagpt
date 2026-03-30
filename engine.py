@@ -10,7 +10,7 @@ import torch
 from torch.distributions import Categorical
 from tqdm import tqdm
 
-from config import ModelConfig, install_config, write_run_config_snapshot
+from configs import ModelConfig, install_config, write_run_config_snapshot
 from data_loader import AlphaDataLoader
 from alphagpt import AlphaGPT, NewtonSchulzLowRankDecay, StableRankMonitor
 from vm import StackVM
@@ -92,6 +92,7 @@ class AlphaEngine(RPNBasedAlphaEngine):
 		self.best_score = -float('inf')
 		self.best_formula = None
 		self.best_pool_score = -float('inf')
+		self.best_avg_reward = -float('inf')
 		self.training_history = {
 			'step': [],
 			'avg_reward': [],
@@ -111,14 +112,16 @@ class AlphaEngine(RPNBasedAlphaEngine):
 		self.resume_alpha_pool_path = self._normalize_optional_path(resume_pool_cfg)
 
 		if self.resume_model_checkpoint:
+			ckpt_path = self._resolve_model_checkpoint_file(self.resume_model_checkpoint)
 			last_step = self.load_checkpoint(
-				self.resume_model_checkpoint,
+				ckpt_path,
 				load_alpha_pool=not bool(self.resume_alpha_pool_path),
 			)
 			self.start_step = max(0, int(last_step) + 1)
+			self.resume_model_checkpoint = ckpt_path
 
 		if self.resume_alpha_pool_path:
-			self._load_alpha_pool_from_path(self.resume_alpha_pool_path)
+			self.resume_alpha_pool_path = self._load_alpha_pool_from_path(self.resume_alpha_pool_path)
 
 	@staticmethod
 	def _normalize_optional_path(path: Optional[str]) -> Optional[str]:
@@ -128,6 +131,29 @@ class AlphaEngine(RPNBasedAlphaEngine):
 		if not s:
 			return None
 		return os.path.abspath(os.path.expanduser(s))
+
+	def _build_valid_token_mask(self, type_stack: list, remaining_steps: int) -> torch.Tensor:
+		"""合法 token 掩码；在剩余步数不足时放宽 finishability，避免误将非法 EOS 放行导致 execute 失败。"""
+		device = ModelConfig.DEVICE
+		valid = torch.zeros(self.model.vocab_size, dtype=torch.bool, device=device)
+		for token_id in range(self.model.vocab_size):
+			if self._is_token_legal(token_id, type_stack, remaining_steps=remaining_steps):
+				valid[token_id] = True
+		if not valid.any():
+			for rs in range(remaining_steps + 1, ModelConfig.MAX_FORMULA_LEN + 1):
+				for token_id in range(self.model.vocab_size):
+					if self._is_token_legal(token_id, type_stack, remaining_steps=rs):
+						valid[token_id] = True
+				if valid.any():
+					break
+		if not valid.any():
+			for token_id in range(self.model.vocab_size):
+				if self._is_token_legal(token_id, type_stack, remaining_steps=ModelConfig.MAX_FORMULA_LEN):
+					valid[token_id] = True
+					break
+		if not valid.any():
+			valid[0] = True
+		return valid
 
 	def _policy_gradient_step(self, log_probs, rewards: torch.Tensor):
 		adv = (rewards - rewards.mean()) / (rewards.std() + ModelConfig.POLICY_ADVANTAGE_EPS)
@@ -346,8 +372,8 @@ class AlphaEngine(RPNBasedAlphaEngine):
 				)
 				p_archive = self.save_checkpoint(step=step, tag=f"best_step_{step + 1:06d}")
 				p = self.save_checkpoint(step=step, tag="best")
-				pool_path = self._save_best_pool_snapshot(step=step, score=sa)
-				tqdm.write(f"  (saved checkpoint: {p}; archive: {p_archive}; best_pool: {pool_path})")
+				pool_path = self._save_best_pool_snapshot(step=step, score=sa, checkpoint_model_path=p)
+				tqdm.write(f"  (saved checkpoint: {p}; archive: {p_archive}; best_alphapool: {pool_path})")
 		elif sz_a > 0:
 			tqdm.write(f"{C_GREEN}[Pool] {sz_a} factors (no score change){C_RESET}")
 
@@ -356,13 +382,18 @@ class AlphaEngine(RPNBasedAlphaEngine):
 		self.run_dir = os.path.join(ModelConfig.LOGGING_DIR, ts)
 		os.makedirs(self.run_dir, exist_ok=True)
 		write_run_config_snapshot(self.run_dir)
+		for sub in ("checkpoints", "current_alphapool", "best_alphapool", "best_model", "pool_ic"):
+			os.makedirs(os.path.join(self.run_dir, sub), exist_ok=True)
 
 		print("Starting AlphaGPT Training...")
 		print(f"   Run directory: {self.run_dir}")
 		if self.resume_model_checkpoint:
-			print(f"   Resume checkpoint: {self.resume_model_checkpoint}")
+			print(f"   Resume model: {self.resume_model_checkpoint}  (可为 .pt 文件或含 checkpoints/latest/model.pt 的 run 目录)")
 		if self.resume_alpha_pool_path:
-			print(f"   Resume alpha pool: {self.resume_alpha_pool_path}")
+			print(
+				f"   Resume alpha pool: {self.resume_alpha_pool_path}  "
+				f"(可为 alpha_pool.pkl 文件，或含 current_alphapool/best_alphapool 的 run 目录)"
+			)
 		print(f"   Start step: {self.start_step} / {ModelConfig.TRAIN_STEPS}")
 		if self.use_lord:
 			print("   LoRD Regularization enabled")
@@ -376,7 +407,10 @@ class AlphaEngine(RPNBasedAlphaEngine):
 
 		ckpt_every = int(ModelConfig.SAVE_CHECKPOINT_EVERY or 0)
 		if ckpt_every > 0:
-			print(f"   Checkpoints every {ckpt_every} steps -> {os.path.join(self.run_dir, 'checkpoints')}/")
+			print(
+				f"   Checkpoints every {ckpt_every} steps -> "
+				f"{os.path.join(self.run_dir, 'checkpoints')}/step_00000N/model.pt"
+			)
 
 		bs = ModelConfig.BATCH_SIZE
 		no_eos_penalty = ModelConfig.NO_EOS_PENALTY
@@ -432,12 +466,7 @@ class AlphaEngine(RPNBasedAlphaEngine):
 					for i in range(bs):
 						if not alive_mask[i]:
 							continue
-						valid = torch.zeros(self.model.vocab_size, dtype=torch.bool, device=ModelConfig.DEVICE)
-						for token_id in range(self.model.vocab_size):
-							if self._is_token_legal(token_id, type_stacks[i], remaining_steps=remaining_steps):
-								valid[token_id] = True
-						if not valid.any():
-							valid[self.model.eos_token_id] = True
+						valid = self._build_valid_token_mask(type_stacks[i], remaining_steps)
 						step_logits[i] = step_logits[i].masked_fill(~valid, float('-inf'))
 
 					dist = Categorical(logits=step_logits)
@@ -483,6 +512,14 @@ class AlphaEngine(RPNBasedAlphaEngine):
 			avg_reward = rewards.mean().item()
 			self._log_step(step, avg_reward, pbar)
 
+			if avg_reward > self.best_avg_reward:
+				self.best_avg_reward = avg_reward
+				bmp = self._save_best_model_by_avg_reward(step, avg_reward)
+				tqdm.write(f"[best_model] step {step + 1} avg_reward={avg_reward:.4f} -> {bmp}")
+
+			if use_pool:
+				self._sync_current_alphapool(step)
+
 			if ckpt_every > 0 and (step + 1) % ckpt_every == 0:
 				p = self._save_step_checkpoint(step)
 				tqdm.write(f"[checkpoint] step {step + 1} -> {p}")
@@ -526,7 +563,7 @@ if __name__ == "__main__":
 		"--config",
 		type=str,
 		default=None,
-		help="Path to config JSON file. Defaults to config.json in project root.",
+		help="Path to config JSON. Defaults to configs/config.json when unset.",
 	)
 	args = parser.parse_args()
 	install_config(args.config)

@@ -1,4 +1,5 @@
 """Shared training helpers for AlphaEngine."""
+import glob
 import json
 import os
 import shutil
@@ -6,46 +7,94 @@ from typing import Optional
 
 import torch
 
-from config import ModelConfig
+from configs import ModelConfig
 
 
 class AlphaEngineBase:
     """Base class for checkpointing, rollout, and training logs."""
 
-    def _checkpoint_dir(self) -> str:
+    def _checkpoints_root(self) -> str:
         if not self.run_dir:
             raise RuntimeError("run_dir not set; train() must create the logging directory first.")
         d = os.path.join(self.run_dir, "checkpoints")
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _checkpoint_path(self, name: str) -> str:
-        return os.path.join(self._checkpoint_dir(), name)
-
-    def _checkpoint_pool_dir(self) -> str:
-        d = os.path.join(self._checkpoint_dir(), "alpha_pool")
+    def _checkpoint_tag_dir(self, tag: str) -> str:
+        d = os.path.join(self._checkpoints_root(), tag)
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _load_alpha_pool_from_path(self, path: str) -> None:
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"alpha pool snapshot not found: {path}")
-        self._restore_alpha_pool_from_path(path)
+    def _load_alpha_pool_from_path(self, path: str) -> str:
+        resolved = self._resolve_alpha_pool_file(path)
+        self._restore_alpha_pool_from_path(resolved)
+        return resolved
 
-    def _save_best_pool_snapshot(self, step: int, score: float) -> str:
+    @staticmethod
+    def _resolve_alpha_pool_file(path: str) -> str:
+        if os.path.isfile(path):
+            return path
+        if os.path.isdir(path):
+            for rel in (
+                "alpha_pool.pkl",
+                os.path.join("current_alphapool", "alpha_pool.pkl"),
+                os.path.join("best_alphapool", "alpha_pool.pkl"),
+            ):
+                cand = os.path.join(path, rel)
+                if os.path.isfile(cand):
+                    return cand
+        raise FileNotFoundError(
+            f"alpha pool snapshot not found (expect a .pkl file or run dir with alpha_pool.pkl): {path}"
+        )
+
+    @staticmethod
+    def _resolve_model_checkpoint_file(path: str) -> str:
+        if os.path.isfile(path):
+            return path
+        if not os.path.isdir(path):
+            raise FileNotFoundError(f"checkpoint not found: {path}")
+        for rel in (
+            os.path.join("latest", "model.pt"),
+            os.path.join("best_model", "model.pt"),
+            os.path.join("final", "model.pt"),
+        ):
+            cand = os.path.join(path, rel)
+            if os.path.isfile(cand):
+                return cand
+        step_pts = sorted(glob.glob(os.path.join(path, "checkpoints", "step_*", "model.pt")))
+        if step_pts:
+            return step_pts[-1]
+        flat = os.path.join(path, "checkpoints", "latest.pt")
+        if os.path.isfile(flat):
+            return flat
+        raise FileNotFoundError(
+            f"model checkpoint not found under directory (expected checkpoints/latest/model.pt or step_*/model.pt): {path}"
+        )
+
+    def _save_best_pool_snapshot(self, step: int, score: float, *, checkpoint_model_path: str | None = None) -> str:
         if not self.run_dir:
             raise RuntimeError("run_dir not set")
-        pool_path = os.path.join(self.run_dir, "best_alpha_pool.pkl")
-        meta_path = os.path.join(self.run_dir, "best_alpha_pool_meta.json")
+        d = os.path.join(self.run_dir, "best_alphapool")
+        os.makedirs(d, exist_ok=True)
+        pool_path = os.path.join(d, "alpha_pool.pkl")
+        meta_path = os.path.join(d, "meta.json")
         pool = getattr(self, "alpha_pool", None)
         if pool is None or not hasattr(pool, "save"):
             raise RuntimeError("alpha_pool is not initialized or not serializable")
         pool.save(pool_path)
+        if checkpoint_model_path and os.path.isfile(checkpoint_model_path):
+            shutil.copy2(checkpoint_model_path, os.path.join(d, "model.pt"))
+        src_ckpt = None
+        if checkpoint_model_path and self.run_dir:
+            try:
+                src_ckpt = os.path.relpath(checkpoint_model_path, start=self.run_dir)
+            except ValueError:
+                src_ckpt = checkpoint_model_path
         meta = {
             "step": int(step),
             "score": float(score),
             "pool_size": len(pool.entries),
-            "source_checkpoint": os.path.join("checkpoints", "best.pt"),
+            "source_checkpoint": src_ckpt,
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -54,16 +103,60 @@ class AlphaEngineBase:
     def _save_step_checkpoint(self, step: int) -> str:
         tag = f"step_{step + 1:06d}"
         path = self.save_checkpoint(step=step, tag=tag)
-        latest_path = self._checkpoint_path("latest.pt")
-        if os.path.abspath(path) != os.path.abspath(latest_path):
-            shutil.copy2(path, latest_path)
+        tag_dir = os.path.dirname(path)
+        latest_dir = os.path.join(self._checkpoints_root(), "latest")
+        if os.path.isdir(latest_dir):
+            shutil.rmtree(latest_dir)
+        shutil.copytree(tag_dir, latest_dir)
+        return path
+
+    def _sync_current_alphapool(self, step: int) -> Optional[str]:
+        pool = getattr(self, "alpha_pool", None)
+        if pool is None or not hasattr(pool, "save") or not self.run_dir:
+            return None
+        d = os.path.join(self.run_dir, "current_alphapool")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "alpha_pool.pkl")
+        pool.save(p)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": int(step), "pool_size": len(pool.entries)}, f, ensure_ascii=False, indent=2)
+        return p
+
+    def _save_best_model_by_avg_reward(self, step: int, avg_reward: float) -> str:
+        if not self.run_dir:
+            raise RuntimeError("run_dir not set")
+        d = os.path.join(self.run_dir, "best_model")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "model.pt")
+        pool_snapshot = None
+        pool = getattr(self, "alpha_pool", None)
+        if pool is not None and hasattr(pool, "save"):
+            pool_snapshot = os.path.join(d, "alpha_pool.pkl")
+            pool.save(pool_snapshot)
+        payload = {
+            "step": int(step),
+            "avg_reward": float(avg_reward),
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.opt.state_dict(),
+            "best_score": self.best_score,
+            "best_formula": self.best_formula,
+        }
+        if hasattr(self, "best_pool_score"):
+            payload["best_pool_score"] = getattr(self, "best_pool_score")
+        if hasattr(self, "training_history"):
+            payload["training_history"] = getattr(self, "training_history")
+        if pool_snapshot:
+            payload["alpha_pool_path"] = "alpha_pool.pkl"
+        torch.save(payload, path)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": int(step), "avg_reward": float(avg_reward)}, f, ensure_ascii=False, indent=2)
         return path
 
     def _save_alpha_pool_snapshot_for_tag(self, tag: str) -> Optional[str]:
         pool = getattr(self, "alpha_pool", None)
         if pool is None or not hasattr(pool, "save"):
             return None
-        pool_path = os.path.join(self._checkpoint_pool_dir(), f"{tag}.pkl")
+        pool_path = os.path.join(self._checkpoint_tag_dir(tag), "alpha_pool.pkl")
         pool.save(pool_path)
         return pool_path
 
@@ -94,7 +187,8 @@ class AlphaEngineBase:
 
     def save_checkpoint(self, step: int, tag: str = "latest") -> str:
         """Save model/optimizer state plus training progress and best metrics."""
-        path = self._checkpoint_path(f"{tag}.pt")
+        tag_dir = self._checkpoint_tag_dir(tag)
+        path = os.path.join(tag_dir, "model.pt")
         pool_snapshot = self._save_alpha_pool_snapshot_for_tag(tag)
         payload = {
             'step': step,
@@ -105,6 +199,8 @@ class AlphaEngineBase:
         }
         if hasattr(self, 'best_pool_score'):
             payload['best_pool_score'] = getattr(self, 'best_pool_score')
+        if hasattr(self, 'best_avg_reward'):
+            payload['best_avg_reward'] = getattr(self, 'best_avg_reward')
         if hasattr(self, 'training_history'):
             payload['training_history'] = getattr(self, 'training_history')
         if pool_snapshot:
@@ -124,6 +220,8 @@ class AlphaEngineBase:
         self.best_formula = payload.get('best_formula')
         if hasattr(self, 'best_pool_score'):
             setattr(self, 'best_pool_score', payload.get('best_pool_score', getattr(self, 'best_pool_score')))
+        if hasattr(self, 'best_avg_reward'):
+            setattr(self, 'best_avg_reward', float(payload.get('best_avg_reward', -float('inf'))))
         if hasattr(self, 'training_history') and isinstance(payload.get('training_history'), dict):
             setattr(self, 'training_history', payload['training_history'])
         pool_path = payload.get('alpha_pool_path')

@@ -19,7 +19,7 @@ from alphapool.ensemble_trainer import (
 )
 from alphapool.pool_feature_logging import save_removed_pool_features
 from alphapool.pool_state import AlphaPoolState, PoolEntry
-from config import ModelConfig
+from configs import ModelConfig
 from helpers.reward_metrics import compute_ic_metrics
 
 

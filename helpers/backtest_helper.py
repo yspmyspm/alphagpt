@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from config import ModelConfig
+from configs import ModelConfig
 
 def check_distribution(arr: np.ndarray) -> bool:
 	"""与 rl-mining toolkit 中的分布检查保持一致。"""

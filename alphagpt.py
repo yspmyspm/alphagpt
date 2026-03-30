@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from config import ModelConfig
+from configs import ModelConfig
 from helpers.myops import get_op_specs, get_ts_parameters
 from factors import FeatureEngineer
 

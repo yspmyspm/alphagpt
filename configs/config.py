@@ -1,14 +1,9 @@
 """
-Training/data configuration.
+训练与数据配置（唯一实现模块）。
 
-Default config file: config.json (project root)
-Override by:
-1) passing path to install_config(config_path=...)
-2) setting environment variable CONFIG_PATH
-3) CLI: python engine.py --config path/to/config.json
-
-Config files support a ``sub_config_paths`` field (dict or list) to include
-sub-config JSON files that are deep-merged before the parent keys.
+- 对外使用 ``from configs import ModelConfig, install_config, ...``（或 ``from configs.config import ...``）。
+- 默认读取与本模块同目录的 ``configs/config.json``；也可用环境变量 ``CONFIG_PATH`` 或 ``install_config(path)`` / ``python engine.py --config ...`` 覆盖。
+- JSON 支持 ``sub_config_paths``（字符串列表或字典值列表），先合并子文件再与主文件合并，最后与内置默认值深度合并。
 """
 from __future__ import annotations
 
@@ -23,12 +18,8 @@ _MERGED_AT_LOAD: Optional[Dict[str, Any]] = None
 _CONFIG_PATH_AT_LOAD: Optional[str] = None
 
 
-def _project_root() -> str:
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 def _default_config_file_path() -> str:
-    return os.path.join(_project_root(), "config.json")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
 def _resolve_config_path(path: Optional[str]) -> str:
@@ -309,4 +300,12 @@ def write_run_config_snapshot(run_dir: str) -> None:
         json.dump(snap, f, ensure_ascii=False, indent=2, default=str)
 
 
+__all__ = [
+    "ModelConfig",
+    "install_config",
+    "load_merged",
+    "write_run_config_snapshot",
+]
+
+# 导入本模块即安装默认配置；无默认 JSON 时用内置默认值。
 install_config()

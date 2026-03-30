@@ -25,9 +25,9 @@ alphagpt/
 ├─ vm.py                         # RPN Stack VM 执行器
 ├─ backtest.py                   # 因子评估入口
 ├─ data_loader.py                # Feather 数据加载
-├─ config.json                   # 主配置文件
-├─ config.py                     # 兼容层（转发到 configs/config.py）
-├─ configs/                      # 配置模块 + 可选子配置
+├─ configs/
+│  ├─ config.json                # 主配置文件（默认数据源）
+│  └─ config.py                  # 加载、合并与 ModelConfig
 ├─ helpers/
 │  ├─ eval_worker.py             # 多进程评估 worker
 │  ├─ reward_metrics.py          # IC/ICIR/compliance 计算
@@ -65,7 +65,7 @@ pip install -r requirements.txt
 
 ## 快速开始
 
-1. 修改 `config.json`（至少确认数据路径和训练参数）。
+1. 修改 `configs/config.json`（至少确认数据路径和训练参数）。
 2. 直接训练：
 
 ```bash
@@ -75,7 +75,7 @@ python engine.py
 3. 指定配置文件路径（可选）：
 
 ```bash
-python engine.py --config config.json
+python engine.py --config configs/config.json
 ```
 
 4. 指定恢复模型 checkpoint：
@@ -90,7 +90,7 @@ python engine.py --resume-model-checkpoint runs/20260330_120000/checkpoints/late
 python engine.py --resume-model-checkpoint runs/20260330_120000/checkpoints/latest.pt --resume-alpha-pool runs/20260330_120000/best_alpha_pool.pkl
 ```
 
-## 配置说明（`config.json`）
+## 配置说明（`configs/config.json`）
 
 主要分组：
 
@@ -125,14 +125,12 @@ python engine.py --resume-model-checkpoint runs/20260330_120000/checkpoints/late
 
 数值稳定性常量（如 `policy_advantage_eps`、`icir_std_eps` 等）已硬编码在 `ModelConfig` 类中，不再通过配置文件暴露。
 
-配置文件支持 `sub_config_paths` 字段，用于引用子配置文件（按路径深度合并）。
-例如可将 `model_architecture` 拆入 `configs/model_architecture.json`，在主配置中引用：
+可选：在主配置 JSON 顶层增加 `sub_config_paths`（字符串列表，或字典的值视为路径列表），引用其它 JSON 片段，加载时先合并子文件再与主文件合并。子文件内仍使用与主配置相同的分组键（如 `model_architecture`、`compliance`）。示例：
 
 ```json
 {
-  "sub_config_paths": {
-    "arch": "configs/model_architecture.json"
-  }
+  "sub_config_paths": ["my_overrides/model_architecture.json"],
+  "runtime": { "device": "auto" }
 }
 ```
 

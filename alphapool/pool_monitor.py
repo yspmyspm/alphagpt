@@ -1,6 +1,6 @@
 """
 每轮训练后：保存 pool 线性组合预测、在全样本上做完整 evaluate，
-并更新 overall_ic / ICIR 等曲线图（raw 与绝对值）。
+并在 pool_ic/ 下按指标分别绘制曲线（overall_ic、dICIR、mICIR、weighted_score，各 raw/abs）。
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from backtest import AlphaBacktest
 from helpers.reward_metrics import evaluate_factor_full, metrics_from_factor_returns_full
 
 
-def _plot_ic_curves(rows: List[Dict[str, Any]], path_raw: str, path_abs: str) -> None:
+def _plot_pool_metric_series(rows: List[Dict[str, Any]], pool_ic_dir: str) -> None:
+    """每个指标单独一张图：overall_ic、dICIR、mICIR、weighted_score；各含 raw 与 abs 版本。"""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -30,43 +31,25 @@ def _plot_ic_curves(rows: List[Dict[str, Any]], path_raw: str, path_abs: str) ->
         return
 
     steps = [r["step"] for r in rows]
-    oic = [r["overall_ic"] for r in rows]
-    dic = [r["daily_icir"] for r in rows]
-    mic = [r["monthly_icir"] for r in rows]
-    wsc = [r["weighted_score"] for r in rows]
-    imean = [r.get("icir_mean", 0.0) for r in rows]
-
-    def _one(path: str, use_abs: bool) -> None:
-        fig, ax = plt.subplots(figsize=(10, 5))
-        if use_abs:
-            oicp, dicp, micp, wscp, imeanp = (
-                np.abs(np.asarray(oic, dtype=float)),
-                np.abs(np.asarray(dic, dtype=float)),
-                np.abs(np.asarray(mic, dtype=float)),
-                np.abs(np.asarray(wsc, dtype=float)),
-                np.abs(np.asarray(imean, dtype=float)),
-            )
-            title = "Pool metrics (absolute values)"
-        else:
-            oicp, dicp, micp, wscp, imeanp = oic, dic, mic, wsc, imean
-            title = "Pool metrics (raw)"
-
-        ax.plot(steps, oicp, label="overall_ic", alpha=0.85)
-        ax.plot(steps, dicp, label="daily_icir", alpha=0.85)
-        ax.plot(steps, micp, label="monthly_icir", alpha=0.85)
-        ax.plot(steps, imeanp, label="icir_mean", alpha=0.75)
-        ax.plot(steps, wscp, label="weighted_ic_score", linestyle="--", alpha=0.75)
-        ax.set_xlabel("train_step")
-        ax.set_ylabel("value")
-        ax.set_title(title)
-        ax.legend(loc="best", fontsize=8)
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        fig.savefig(path, dpi=120)
-        plt.close(fig)
-
-    _one(path_raw, use_abs=False)
-    _one(path_abs, use_abs=True)
+    series = [
+        ("overall_ic", [float(r["overall_ic"]) for r in rows], "overall_ic"),
+        ("daily_icir", [float(r["daily_icir"]) for r in rows], "dICIR (daily ICIR)"),
+        ("monthly_icir", [float(r["monthly_icir"]) for r in rows], "mICIR (monthly ICIR)"),
+        ("weighted_score", [float(r["weighted_score"]) for r in rows], "weighted_score"),
+    ]
+    for fname, ys, label in series:
+        for use_abs, suf in ((False, "raw"), (True, "abs")):
+            arr = np.asarray(ys, dtype=float)
+            yplot = np.abs(arr) if use_abs else arr
+            fig, ax = plt.subplots(figsize=(9, 4))
+            ax.plot(steps, yplot, linewidth=1.2, color="C0")
+            ax.set_xlabel("train_step")
+            ax.set_ylabel("value")
+            ax.set_title(f"{label} ({suf})")
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(os.path.join(pool_ic_dir, f"{fname}_{suf}.png"), dpi=120)
+            plt.close(fig)
 
 
 def update_pool_monitoring(
@@ -89,7 +72,9 @@ def update_pool_monitoring(
     """
     factors = pool.factor_series_list()
     pool_dir = os.path.join(run_dir, "pool_artifacts")
+    pool_ic_dir = os.path.join(run_dir, "pool_ic")
     os.makedirs(pool_dir, exist_ok=True)
+    os.makedirs(pool_ic_dir, exist_ok=True)
 
     if not factors or len(data_idx) == 0:
         return
@@ -163,9 +148,7 @@ def update_pool_monitoring(
     }
     history.append(row)
 
-    with open(os.path.join(pool_dir, "pool_metrics_history.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(pool_ic_dir, "pool_metrics_history.json"), "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
-    raw_path = os.path.join(run_dir, "pool_ic_raw.png")
-    abs_path = os.path.join(run_dir, "pool_ic_abs.png")
-    _plot_ic_curves(history, raw_path, abs_path)
+    _plot_pool_metric_series(history, pool_ic_dir)

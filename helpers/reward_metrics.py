@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from config import ModelConfig
+from configs import ModelConfig
 from helpers.backtest_helper import (
     check_finite_count,
     check_distribution,
