@@ -2,55 +2,56 @@ import numpy as np
 import pandas as pd
 
 def check_distribution(arr: np.ndarray) -> bool:
-    """与 rl-mining toolkit 中的分布检查保持一致。"""
-    fv = arr.copy()
-    fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
-    skew = pd.Series(fv).skew()
-    kurt = pd.Series(fv).kurt()
-    if np.isnan(skew) or np.isnan(kurt):
-        return False
-    if abs(skew) > 10 or abs(kurt) > 100:
-        return False
-    if np.nanstd(fv) == 0:
-        return False
-    return True
+	"""与 rl-mining toolkit 中的分布检查保持一致。"""
+	fv = arr.copy()
+	fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
+	skew = pd.Series(fv).skew()
+	kurt = pd.Series(fv).kurt()
+	if np.isnan(skew) or np.isnan(kurt):
+		return False
+	if abs(skew) > 10 or abs(kurt) > 100:
+		return False
+	if np.nanstd(fv) == 0:
+		return False
+	return True
 
 
 def score_finite_ratio(arr: np.ndarray, min_ratio: float = 0.95) -> float:
-    """返回 [0, 1] 的有限值比例分数，1 表示完全通过。"""
-    finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
-    return min(1.0, finite_ratio / min_ratio)
+	"""返回 [0, 1] 的有限值比例分数，1 表示完全通过。"""
+	finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
+	return min(1.0, finite_ratio / min_ratio)
 
 
 def score_distribution(arr: np.ndarray, skew_limit: float = 40.0, kurt_limit: float = 1000.0) -> float:
-    """返回 [0, 1] 的分布分数，1 表示完全通过。"""
-    fv = arr.copy()
-    fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
-    skew = pd.Series(fv).skew()
-    kurt = pd.Series(fv).kurt()
-    if np.isnan(skew) or np.isnan(kurt):
-        return 0.0
-    if np.nanstd(fv) == 0:
-        return 0.0
-    # 线性插值：skew 在 [0, 10] 得 1，在 [10, 20] 线性降到 0
-    skew_score = max(0.0, 1.0 - abs(skew) / skew_limit)
-    kurt_score = max(0.0, 1.0 - abs(kurt) / kurt_limit)
-    return min(skew_score, kurt_score)
+	"""返回 [0, 1] 的分布分数，1 表示完全通过。"""
+	fv = arr.copy()
+	fv = (fv - np.nanmean(fv)) / (np.nanstd(fv) + 1e-8)
+	skew = pd.Series(fv).skew()
+	kurt = pd.Series(fv).kurt()
+	if np.isnan(skew) or np.isnan(kurt):
+		return 0.0
+	if np.nanstd(fv) == 0:
+		return 0.0
+	# 线性插值：skew 在 [0, 10] 得 1，在 [10, 20] 线性降到 0
+	skew_score = max(0.0, 1.0 - abs(skew) / skew_limit)
+	kurt_score = max(0.0, 1.0 - abs(kurt) / kurt_limit)
+	return min(skew_score, kurt_score)
 
 
 def score_halflife(arr: np.ndarray, min_corr: float = 0.5) -> float:
-    """返回 [0, 1] 的半衰期分数，corr >= min_corr 得 1。"""
-    shifted = np.roll(arr, 5)
-    shifted[:5] = np.nan
-    corr = finite_rcor(arr, shifted)
-    if np.isnan(corr) or np.isinf(corr):
-        return 0.0
-    return min(1.0, max(0.0, (corr + 1.0) / (min_corr + 1.0)))  # 从 -1 到 min_corr 线性映射到 [0,1]
+	"""返回 [0, 1] 的半衰期分数，corr >= min_corr 得 1。"""
+	shifted = np.roll(arr, 5)
+	shifted[:5] = np.nan
+	corr = finite_rcor(arr, shifted)
+	if np.isnan(corr) or np.isinf(corr):
+		return 0.0
+	
+	return min(1.0, max(0.0, (corr + 1.0) / (min_corr + 1.0)))  # 从 -1 到 min_corr 线性映射到 [0,1]
 
 
 def check_finite_count(arr: np.ndarray, min_ratio: float = 0.95) -> bool:
-    finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
-    return finite_ratio >= min_ratio
+	finite_ratio = np.isfinite(arr).sum() / max(1, arr.shape[0])
+	return finite_ratio >= min_ratio
 
 def check_halflife(arr: np.ndarray) -> float:
 	shifted = np.roll(arr, 5)
@@ -59,6 +60,7 @@ def check_halflife(arr: np.ndarray) -> float:
 	return corr >= 0.5
 
 def calc_monthlyic(df):
+	df.replace([np.inf, -np.inf, np.nan], 0, inplace=True)
 	values = df[['factor', 'returns']].to_numpy(dtype=float)
 	f = values[:, 0]
 	r = values[:, 1]
@@ -83,7 +85,11 @@ def calc_monthlyic(df):
 	return monthly_ic
 
 def calc_dailyic(df):
+	df.replace([np.inf, -np.inf, np.nan], 0, inplace=True)
 	values = df[['factor', 'returns']].to_numpy(dtype=float)
+	print("factor", df['factor'].abs().max())
+	print("returns", df['returns'].abs().max())
+	print("factor * returns", (df['factor'] * df['returns']).abs().max())
 	f = values[:, 0]
 	r = values[:, 1]
 	day_codes = df.index.values.astype('datetime64[D]').astype('int64')
@@ -123,15 +129,18 @@ def r_cor(
 		_f2 = np.copy(f2)
 		_f2[~np.isfinite(_f2)] = 0
 
+
 	if np.dot(_f1, _f1) == 0:
 		return 0.0
 	if np.dot(_f2, _f2) == 0:
 		return 0.0
 	
 	
+	
 	if weight is None:
 		return np.dot(_f1, _f2) / np.sqrt(np.dot(_f1, _f1) * np.dot(_f2, _f2))
 	else:
+		raise ValueError("weight is not supported")
 		return np.dot(weight*_f1, _f2) / np.sqrt(np.dot(weight*_f1, weight*_f1) * np.dot(weight*_f2, weight*_f2))
 
 def finite_rcor(f1, f2, weight = None):

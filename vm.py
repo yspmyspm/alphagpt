@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from helpers.ops import get_op_specs, get_ts_parameters
+from helpers.myops import get_op_specs, get_ts_parameters
 from factors import FeatureEngineer
 
 

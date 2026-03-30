@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from config import ModelConfig
-from helpers.ops import get_op_specs, get_ts_parameters
+from helpers.myops import get_op_specs, get_ts_parameters
 from factors import FeatureEngineer
 
 

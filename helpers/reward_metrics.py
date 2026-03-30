@@ -49,6 +49,7 @@ def align_factor_returns(
     if mask.sum() == 0:
         return None
     common = common[mask]
+
     return common, f[mask], r[mask]
 
 
@@ -124,9 +125,12 @@ def compute_compliance_only(
     返回 (s_finite, s_dist, s_halflife, compliance)。
     """
     aligned = align_factor_returns(factor, returns)
+
+
     if aligned is None:
         return None
     common, f, r = aligned
+
 
     s_finite = score_finite_ratio(f)
     s_dist = score_distribution(f)
@@ -145,6 +149,7 @@ def compute_compliance_only(
             compliance *= 0.0
         else:
             return None
+
 
     return float(s_finite), float(s_dist), float(s_halflife), float(compliance)
 

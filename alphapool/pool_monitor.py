@@ -96,7 +96,7 @@ def update_pool_monitoring(
     if not factors or len(train_idx) == 0 or len(test_idx) == 0:
         return
 
-    fit = trainer.fit(
+    fit = trainer.gfit(
         factors,
         returns,
         train_idx,

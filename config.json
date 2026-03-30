@@ -1,26 +1,39 @@
 {
-  "device": "auto",
-  "feather_path": "data/olhcv.feather",
-  "returns_dir": "returns",
-  "returns_filename": "30min.feather",
-  "returns_column": "returns",
-  "feature_columns": null,
-  "batch_size": 1024,
-  "train_steps": 1000,
-  "max_formula_len": 12,
-  "gen_temperature": 1.0,
-  "ts_parameters": [1, 5, 10, 30, 60, 120, 1440],
-  "use_smooth_reward": true,
-  "backtest_penalty": -5.0,
-  "unfinished_penalty": -5.0,
-  "icir_missing_gamma": 2.0,
-  "icir_missing_eps": 1e-6,
-  "eval_num_workers": 0,
-  "logging_dir": "runs",
-  "save_checkpoint_every": 100,
-  "use_alpha_pool": true,
-  "alpha_pool_size": 32,
-  "alpha_train_years": 2.0,
-  "alpha_missing_threshold": 0.3,
-  "alpha_pool_fragment_eval": true
+  "runtime": {
+    "device": "auto",
+    "eval_num_workers": 0,
+    "logging_dir": "runs"
+  },
+  "data": {
+    "feather_path": "data/olhcv.feather",
+    "returns_dir": "returns",
+    "returns_filename": "30min.feather",
+    "returns_column": "returns",
+    "feature_columns": null
+  },
+  "training": {
+    "batch_size": 10,
+    "train_steps": 1000,
+    "save_checkpoint_every": 100
+  },
+  "model": {
+    "max_formula_len": 12,
+    "gen_temperature": 1.0,
+    "ts_parameters": [1, 5, 10, 30, 60, 120, 1440]
+  },
+  "scoring": {
+    "use_smooth_reward": true,
+    "backtest_penalty": -5.0,
+    "unfinished_penalty": -5.0,
+    "icir_missing_gamma": 2.0,
+    "icir_missing_eps": 1e-6
+  },
+  "alpha_pool": {
+    "use_alpha_pool": true,
+    "alpha_pool_size": 32,
+    "alpha_train_years": 2.0,
+    "alpha_missing_threshold": 0.3,
+    "alpha_pool_fragment_eval": false,
+    "ensemble_maxiter": 10
+  }
 }

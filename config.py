@@ -1,11 +1,12 @@
 """
 训练/数据配置：默认从项目根目录的 config.json 读取，可用环境变量 CONFIG_PATH 指定其他路径。
-修改参数请编辑 config.json，无需改本文件。
+config.json 按类别分块（runtime / data / training / …），顶层也可写扁平键覆盖（兼容旧格式）。
 """
 from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 import torch
@@ -21,44 +22,82 @@ def _config_file_path() -> str:
     )
 
 
-def _defaults() -> dict:
+def _defaults_nested() -> dict:
+    """分类默认项；eval_num_workers 为 0 时表示「自动」：在 install_config 里解析。"""
     return {
-        "device": "auto",
-        "feather_path": os.path.join("data", "olhcv.feather"),
-        "returns_dir": "returns",
-        "returns_filename": "30min.feather",
-        "returns_column": "returns",
-        "feature_columns": None,
-        "batch_size": 1024,
-        "train_steps": 1000,
-        "max_formula_len": 12,
-        "gen_temperature": 1.0,
-        "ts_parameters": [1, 5, 10, 30, 60, 120, 1440],
-        "use_smooth_reward": True,
-        "backtest_penalty": -5.0,
-        "unfinished_penalty": -5.0,
-        "icir_missing_gamma": 2.0,
-        "icir_missing_eps": 1e-6,
-        "eval_num_workers": max(1, (os.cpu_count() or 4) - 1),
-        "logging_dir": "runs",
-        "save_checkpoint_every": 100,
-        "use_alpha_pool": True,
-        "alpha_pool_size": 32,
-        "alpha_train_years": 2.0,
-        "alpha_missing_threshold": 0.3,
-        "alpha_pool_fragment_eval": True,
+        "runtime": {
+            "device": "auto",
+            "eval_num_workers": 0,
+            "logging_dir": "runs",
+        },
+        "data": {
+            "feather_path": os.path.join("data", "olhcv.feather"),
+            "returns_dir": "returns",
+            "returns_filename": "30min.feather",
+            "returns_column": "returns",
+            "feature_columns": None,
+        },
+        "training": {
+            "batch_size": 1024,
+            "train_steps": 1000,
+            "save_checkpoint_every": 100,
+        },
+        "model": {
+            "max_formula_len": 12,
+            "gen_temperature": 1.0,
+            "ts_parameters": [1, 5, 10, 30, 60, 120, 1440],
+        },
+        "scoring": {
+            "use_smooth_reward": True,
+            "backtest_penalty": -5.0,
+            "unfinished_penalty": -5.0,
+            "icir_missing_gamma": 2.0,
+            "icir_missing_eps": 1e-6,
+        },
+        "alpha_pool": {
+            "use_alpha_pool": True,
+            "alpha_pool_size": 32,
+            "alpha_train_years": 2.0,
+            "alpha_missing_threshold": 0.3,
+            "alpha_pool_fragment_eval": True,
+            "ensemble_maxiter": 400,
+        },
     }
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    out = deepcopy(base)
+    for k, v in override.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = deepcopy(v) if isinstance(v, dict) else v
+    return out
+
+
+def _flatten_config(obj: dict) -> dict:
+    """
+    单层分类 dict -> 扁平 dict。子表中的键先展开，顶层非 dict 键最后写入（可覆盖同名扁平键，兼容旧版顶层 batch_size 等）。
+    """
+    flat: Dict[str, Any] = {}
+    for k, v in obj.items():
+        if isinstance(v, dict):
+            flat.update(v)
+    for k, v in obj.items():
+        if not isinstance(v, dict):
+            flat[k] = v
+    return flat
+
+
 def load_merged() -> dict:
-    """合并默认项与 config.json（后者覆盖前者）。"""
-    merged = _defaults().copy()
+    """合并默认项与 config.json（后者覆盖前者），返回扁平 dict。"""
+    merged = deepcopy(_defaults_nested())
     path = _config_file_path()
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as f:
             user = json.load(f)
-        merged.update(user)
-    return merged
+        merged = _deep_merge(merged, user)
+    return _flatten_config(merged)
 
 
 def _device_from_str(s: str | None) -> torch.device:
@@ -106,6 +145,7 @@ def install_config() -> None:
     ModelConfig.ALPHA_TRAIN_YEARS = float(m.get("alpha_train_years", 2.0))
     ModelConfig.ALPHA_MISSING_THRESHOLD = float(m.get("alpha_missing_threshold", 0.3))
     ModelConfig.ALPHA_POOL_FRAGMENT_EVAL = bool(m.get("alpha_pool_fragment_eval", True))
+    ModelConfig.ENSEMBLE_MAXITER = int(m.get("ensemble_maxiter", 400))
 
     ModelConfig.INPUT_DIM = None
 

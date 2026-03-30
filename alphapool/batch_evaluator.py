@@ -12,6 +12,7 @@ import torch
 from alphapool.correlation import max_abs_pearson
 from alphapool.ensemble_trainer import AbstractEnsembleTrainer, LinearMeanStdEnsembleTrainer
 from alphapool.pool_state import AlphaPoolState, PoolEntry
+from config import ModelConfig
 
 
 class AlphaPoolBatchEvaluator:
@@ -44,12 +45,14 @@ class AlphaPoolBatchEvaluator:
 
     @classmethod
     def default_trainer(cls) -> LinearMeanStdEnsembleTrainer:
-        return LinearMeanStdEnsembleTrainer()
+        return LinearMeanStdEnsembleTrainer(
+            maxiter=int(getattr(ModelConfig, "ENSEMBLE_MAXITER", 400)),
+        )
 
     def _baseline_test_score(self, pool_factors: List[pd.Series]) -> float:
         if not pool_factors:
             return 0.0
-        fit = self.trainer.fit(
+        fit = self.trainer.gfit(
             pool_factors,
             self.returns,
             self.train_idx,
@@ -72,7 +75,7 @@ class AlphaPoolBatchEvaluator:
         compliance = float(r.get("compliance", 0.0))
         max_c = max_abs_pearson(factor, pool_factors, self.train_idx)
         cand_factors = pool_factors + [factor]
-        fit = self.trainer.fit(
+        fit = self.trainer.gfit(
             cand_factors,
             self.returns,
             self.train_idx,
@@ -120,7 +123,7 @@ class AlphaPoolBatchEvaluator:
         pool_entries = [(e.formula, e.factor) for e in self.pool.entries]
         all_entries = pool_entries + gainers
         factors = [fx for _, fx in all_entries]
-        fit = self.trainer.fit(
+        fit = self.trainer.gfit(
             factors,
             self.returns,
             self.train_idx,

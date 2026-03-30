@@ -13,10 +13,7 @@ import pandas as pd
 
 from helpers.reward_metrics import performance_score_on_subset
 
-try:
-    from scipy.optimize import minimize
-except ImportError:  # pragma: no cover
-    minimize = None
+from scipy.optimize import minimize
 
 
 def _softmax(u: np.ndarray) -> np.ndarray:
@@ -70,7 +67,7 @@ class AbstractEnsembleTrainer(ABC):
     """可扩展：例如 LGBMEnsembleTrainer。"""
 
     @abstractmethod
-    def fit(
+    def gfit(
         self,
         factors: List[pd.Series],
         returns: pd.Series,
@@ -93,7 +90,7 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
     def __init__(self, maxiter: int = 400):
         self.maxiter = maxiter
 
-    def fit(
+    def gfit(
         self,
         factors: List[pd.Series],
         returns: pd.Series,
@@ -104,26 +101,13 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         icir_missing_eps: float,
         fragment_eval: bool = True,
     ) -> EnsembleFitResult:
-        if not factors or len(train_idx) == 0 or len(test_idx) == 0:
-            return EnsembleFitResult(
-                weights=np.zeros(len(factors)),
-                train_score=None,
-                test_score=None,
-            )
+
 
         n = len(factors)
         X_tr = _build_design_matrix(factors, train_idx)
         r_tr = returns.reindex(train_idx).values.astype(np.float64)
         r_tr = np.nan_to_num(r_tr, nan=0.0, posinf=0.0, neginf=0.0)
 
-        ev_mode = "fragment_ic" if fragment_eval else "full_weighted"
-
-        if minimize is None:
-            w = np.ones(n) / n
-            return self._pack_result(
-                w, factors, returns, train_idx, test_idx,
-                icir_missing_gamma, icir_missing_eps, ev_mode,
-            )
 
         def objective(u: np.ndarray) -> float:
             w = _softmax(u)
@@ -136,7 +120,7 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
                 train_idx,
                 icir_missing_gamma=icir_missing_gamma,
                 icir_missing_eps=icir_missing_eps,
-                eval_mode=ev_mode,
+                eval_mode="full_weighted",
             )
             return -float(sc) if sc is not None else 1e9
 
@@ -145,7 +129,7 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         w_opt = _softmax(res.x) if res.success else np.ones(n) / n
         return self._pack_result(
             w_opt, factors, returns, train_idx, test_idx,
-            icir_missing_gamma, icir_missing_eps, ev_mode,
+            icir_missing_gamma, icir_missing_eps, "full_weighted",
         )
 
     def _pack_result(
