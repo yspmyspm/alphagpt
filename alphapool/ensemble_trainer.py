@@ -96,6 +96,11 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         icir_missing_eps: float,
     ) -> EnsembleFitResult:
         n = len(factors)
+        if n == 0:
+            return EnsembleFitResult(
+                weights=np.zeros(0, dtype=np.float64),
+                score=None,
+            )
         X = _build_design_matrix(factors, data_idx)
         r = returns.reindex(data_idx).values.astype(np.float64)
         r = np.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
@@ -119,22 +124,19 @@ class LinearMeanStdEnsembleTrainer(AbstractEnsembleTrainer):
         res = minimize(objective, u0, method="L-BFGS-B", options={"maxiter": self.maxiter})
         w_opt = _softmax(res.x)
         return self._pack_result(
-            w_opt, factors, returns, data_idx,
+            w_opt, X, r, data_idx,
             icir_missing_gamma, icir_missing_eps,
         )
 
     def _pack_result(
         self,
         w: np.ndarray,
-        factors: List[pd.Series],
-        returns: pd.Series,
+        X: np.ndarray,
+        r: np.ndarray,
         data_idx: pd.Index,
         icir_missing_gamma: float,
         icir_missing_eps: float,
     ) -> EnsembleFitResult:
-        X = _build_design_matrix(factors, data_idx)
-        r = returns.reindex(data_idx).values.astype(np.float64)
-        r = np.nan_to_num(r, nan=0.0)
         pred = X @ w
         s = pd.Series(pred, index=data_idx)
         sc = performance_score_on_subset(

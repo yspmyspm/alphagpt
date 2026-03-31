@@ -98,7 +98,49 @@ class AlphaEngineBase:
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+        self._save_pool_feature_view_for_snapshot(step=step, subdir="best_alphapool")
         return pool_path
+
+    def _save_pool_feature_view_for_snapshot(self, step: int, *, subdir: str) -> Optional[str]:
+        """为 current/best alphapool 目录补充 manifest + 分布 + 因子值快照。"""
+        if not self.run_dir:
+            return None
+        pool = getattr(self, "alpha_pool", None)
+        if pool is None or not hasattr(pool, "entries") or len(pool.entries) == 0:
+            return None
+        formula_to_str = getattr(self, "_formula_to_str", None)
+        if not callable(formula_to_str):
+            return None
+        loader = getattr(self, "loader", None)
+        returns = getattr(loader, "returns", None)
+        data_idx = getattr(self, "data_idx", None)
+        evaluator = getattr(self, "pool_batch_evaluator", None)
+        if returns is None or data_idx is None or evaluator is None:
+            return None
+        factors = pool.factor_series_list() if hasattr(pool, "factor_series_list") else [e.factor for e in pool.entries]
+        if not factors:
+            return None
+
+        fit = evaluator.trainer.gfit(
+            factors,
+            returns,
+            data_idx,
+            icir_missing_gamma=evaluator.icir_missing_gamma,
+            icir_missing_eps=evaluator.icir_missing_eps,
+        )
+        from alphapool.pool_feature_logging import save_pool_feature_snapshot
+
+        return save_pool_feature_snapshot(
+            self.run_dir,
+            step,
+            pool.entries,
+            formula_to_str,
+            returns,
+            subdir=subdir,
+            weights=fit.weights,
+            use_step_subdir=False,
+            include_feature_values=True,
+        )
 
     def _save_step_checkpoint(self, step: int) -> str:
         tag = f"step_{step + 1:06d}"
@@ -250,9 +292,43 @@ class AlphaEngineBase:
         return path
 
 class RPNBasedAlphaEngine(AlphaEngineBase):
+	_MIN_WINDOW_BY_OP = {
+		"ts_rank": 2,
+		"ts_beta": 2,
+		"ts_resid": 2,
+		"ts_skew": 3,
+		"ts_kurt": 4,
+	}
+
+	@staticmethod
+	def _stack_entry_kind(entry):
+		if isinstance(entry, tuple) and len(entry) >= 1:
+			return entry[0]
+		return entry
+
+	@staticmethod
+	def _stack_entry_param(entry):
+		if isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == "P":
+			return int(entry[1])
+		return None
+
+	def _is_param_window_legal_for_op(self, token_id: int, param_value: int | None) -> bool:
+		if param_value is None:
+			return True
+		op_name_by_token_id = getattr(self, "op_name_by_token_id", None)
+		if not isinstance(op_name_by_token_id, dict):
+			return True
+		op_name = op_name_by_token_id.get(int(token_id))
+		if op_name is None:
+			return True
+		min_window = self._MIN_WINDOW_BY_OP.get(op_name)
+		if min_window is None:
+			return True
+		return int(param_value) >= int(min_window)
+
 	def _minimum_tokens_to_finish(self, type_stack) -> int:
-		f_count = sum(1 for t in type_stack if t == "F")
-		p_count = sum(1 for t in type_stack if t == "P")
+		f_count = sum(1 for t in type_stack if self._stack_entry_kind(t) == "F")
+		p_count = sum(1 for t in type_stack if self._stack_entry_kind(t) == "P")
 		if f_count <= 0:
 			return 10**9
 		return max(f_count - 1, p_count) + 1
@@ -264,30 +340,44 @@ class RPNBasedAlphaEngine(AlphaEngineBase):
 		max_stack_size = int(ModelConfig.MAX_DECODE_STACK_SIZE)
 
 		if token_id == self.model.eos_token_id:
-			return len(type_stack) == 1 and type_stack[-1] == "F"
+			return len(type_stack) == 1 and self._stack_entry_kind(type_stack[-1]) == "F"
 
 		legal = False
 		if token_id < self.model.ts_param_start:
 			legal = True
 
 		if self.model.ts_param_start <= token_id < self.model.ts_param_end:
-			legal = len(type_stack) > 0 and type_stack[-1] == "F"
+			legal = len(type_stack) > 0 and self._stack_entry_kind(type_stack[-1]) == "F"
 
 		if not legal and self.model.op_start <= token_id < self.model.op_end:
 			kind = self.op_kind_by_token_id[token_id]
 			if kind == "binary":
-				legal = len(type_stack) >= 2 and type_stack[-1] == "F" and type_stack[-2] == "F"
+				legal = (
+					len(type_stack) >= 2
+					and self._stack_entry_kind(type_stack[-1]) == "F"
+					and self._stack_entry_kind(type_stack[-2]) == "F"
+				)
 			if kind in ("unary_parameterized", "ts_unary"):
-				legal = len(type_stack) >= 2 and type_stack[-1] == "P" and type_stack[-2] == "F"
+				legal = (
+					len(type_stack) >= 2
+					and self._stack_entry_kind(type_stack[-1]) == "P"
+					and self._stack_entry_kind(type_stack[-2]) == "F"
+				)
+				if legal:
+					param_value = self._stack_entry_param(type_stack[-1])
+					legal = self._is_param_window_legal_for_op(token_id, param_value)
 			if kind == "unary_parameterless":
-				legal = len(type_stack) >= 1 and type_stack[-1] == "F"
+				legal = len(type_stack) >= 1 and self._stack_entry_kind(type_stack[-1]) == "F"
 			if kind == "ts_binary":
 				legal = (
 					len(type_stack) >= 3
-					and type_stack[-1] == "P"
-					and type_stack[-2] == "F"
-					and type_stack[-3] == "F"
+					and self._stack_entry_kind(type_stack[-1]) == "P"
+					and self._stack_entry_kind(type_stack[-2]) == "F"
+					and self._stack_entry_kind(type_stack[-3]) == "F"
 				)
+				if legal:
+					param_value = self._stack_entry_param(type_stack[-1])
+					legal = self._is_param_window_legal_for_op(token_id, param_value)
 
 		if not legal:
 			return False
@@ -303,7 +393,13 @@ class RPNBasedAlphaEngine(AlphaEngineBase):
 			type_stack.append("F")
 			return
 		if self.model.ts_param_start <= token_id < self.model.ts_param_end:
-			type_stack.append("P")
+			param_value = None
+			ts_params = getattr(self.model, "ts_parameters", None)
+			if ts_params is not None:
+				param_idx = int(token_id) - int(self.model.ts_param_start)
+				if 0 <= param_idx < len(ts_params):
+					param_value = int(ts_params[param_idx])
+			type_stack.append(("P", param_value) if param_value is not None else "P")
 			return
 		if self.model.op_start <= token_id < self.model.op_end:
 			kind = self.op_kind_by_token_id[token_id]

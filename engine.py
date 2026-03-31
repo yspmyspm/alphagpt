@@ -103,6 +103,10 @@ class AlphaEngine(RPNBasedAlphaEngine):
 			self.model.op_start + i: spec[2]
 			for i, spec in enumerate(self.model.op_specs)
 		}
+		self.op_name_by_token_id = {
+			self.model.op_start + i: spec[0]
+			for i, spec in enumerate(self.model.op_specs)
+		}
 		self.run_dir = None
 		self.start_step = 0
 

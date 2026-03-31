@@ -94,8 +94,24 @@ def update_pool_monitoring(
             formula_to_str,
             returns,
             weights=fit.weights,
+            include_feature_values=False,
         )
-    pred = build_full_prediction(factors, returns, fit.weights)
+        save_pool_feature_snapshot(
+            run_dir,
+            step,
+            pool.entries,
+            formula_to_str,
+            returns,
+            subdir="current_alphapool",
+            weights=fit.weights,
+            use_step_subdir=False,
+            include_feature_values=True,
+        )
+    pred = build_full_prediction(
+        factors,
+        returns,
+        fit.weights,
+    )
     if len(pred) == 0:
         return
 

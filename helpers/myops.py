@@ -151,7 +151,7 @@ class unary_parameterless:
 
 	@staticmethod
 	def sigmoid(x: pd.Series):
-		return 1.0 / (1.0 + np.exp((-x).clip(max = 100)))
+		return 1.0 / (1.0 + np.exp((-x).clip(upper=100)))
 
 	@staticmethod
 	def softsign(x: pd.Series):

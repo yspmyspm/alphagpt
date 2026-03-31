@@ -93,7 +93,11 @@ class AlphaPoolBatchEvaluator:
             icir_missing_gamma=self.icir_missing_gamma,
             icir_missing_eps=self.icir_missing_eps,
         )
-        pred = build_full_prediction(factors, self.returns, fit.weights)
+        pred = build_full_prediction(
+            factors,
+            self.returns,
+            fit.weights,
+        )
         zero = PoolMetrics(score=fit.score, overall_ic=0, daily_icir=0, monthly_icir=0,
                            daily_coverage=0, monthly_coverage=0)
         if len(pred) == 0:

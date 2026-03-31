@@ -98,20 +98,18 @@ def eval_formula_for_pool(formula):
         return {"ok": True, "missing_high": True, "missing_ratio": mr, "formula": formula}
 
     std_val = res.std()
-
+    
     if std_val < _worker_low_std_threshold:
         ratio = min(1.0, std_val / _worker_low_std_threshold)
         reward = _worker_low_std_penalty_base * (1.0 - ratio)
         return {"ok": True, "low_std": True, "reward": reward, "formula": formula}
-    
-
-
 
     comp = compute_compliance_only(res, _worker_returns, use_smooth_reward=_worker_use_smooth)
-    
+
     if comp is None:
         return {"ok": False, "reason": "compliance", "formula": formula}
     
+
 
     s_fin, s_dist, s_halflife, compliance = comp
     return {

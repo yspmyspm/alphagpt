@@ -23,7 +23,7 @@
     "resume_alpha_pool_path": null
   },
   "model": {
-    "max_formula_len": 40,
+    "max_formula_len": 10,
     "gen_temperature": 1.0,
     "ts_parameters": [1, 5, 10, 30, 60, 120, 1440],
     "max_decode_stack_size": 4
@@ -74,6 +74,6 @@
     "alpha_pool_size": 100,
     "alpha_missing_threshold": 0.3,
     "alpha_max_corr_min_points": 10,
-    "ensemble_maxiter": 10
+    "ensemble_maxiter": 30
   }
 }
