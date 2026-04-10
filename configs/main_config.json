@@ -1,0 +1,52 @@
+{
+  "runtime": {
+    "device": "auto",
+    "logging_dir": "../runs"
+  },
+  "ExprEval": {
+    "data_path": null
+  },
+  "training": {
+    "batch_size": 5,
+    "train_steps": 1000,
+    "save_checkpoint_every": 10,
+    "optimizer_lr": 1e-3,
+    "policy_advantage_eps": 1e-5
+  },
+  "resume": {
+    "resume_model_checkpoint": null,
+    "resume_alpha_pool_path": null
+  },
+  "model": {
+    "max_formula_len": 20,
+    "gen_temperature": 1.0,
+    "sampling_temperature_floor": 1e-6,
+    "max_decode_stack_size": 4
+  },
+  "model_architecture": {
+    "d_model": 64,
+    "nhead": 4,
+    "num_layers": 2,
+    "dim_feedforward": 128,
+    "num_loops": 3,
+    "dropout": 0.1,
+    "mtp_num_tasks": 3
+  },
+  "regularization": {
+    "use_lord_regularization": false,
+    "lord_decay_rate": 1e-3,
+    "lord_num_iterations": 5,
+    "lord_decay_keywords": ["q_proj", "k_proj", "attention", "qk_norm"],
+    "lord_rank_monitor_keywords": ["q_proj", "k_proj"],
+    "lord_rank_log_every": 100
+  },
+  "scoring": {
+    "no_eos_penalty": -5.0,
+    "reward_w_daily": 0.3,
+    "reward_w_monthly": 0.3,
+    "reward_w_ic": 0.4
+  },
+  "alpha_pool": {
+    "use_alpha_pool": true
+  }
+}

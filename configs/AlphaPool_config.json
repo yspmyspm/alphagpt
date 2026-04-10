@@ -1,0 +1,68 @@
+{
+  "paths": {
+    "data_root": "..",
+    "persist_dir": "runs",
+    "initial_pool_path": null,
+    "auto_persist_state": true
+  },
+  "deployment": {
+    "ray_address": "auto",
+    "coordinator": {
+      "num_cpus": 0,
+      "memory": null,
+      "resources": null,
+      "label_selector": null
+    },
+    "worker": {
+      "count": 5,
+      "num_cpus": 1,
+      "memory": null,
+      "resources": null,
+      "label_selector": null
+    },
+    "keep_alive": false
+  },
+  "returns_data": {
+    "returns_dir": "returns",
+    "returns_filename": "30min.feather",
+    "returns_column": "returns"
+  },
+  "pool": {
+    "alpha_pool_size": 100
+  },
+  "feature_filters": {
+    "missing_threshold": 0.3,
+    "low_std_threshold": 0.0001
+  },
+  "trainer": {
+    "class_path": "ensemble_trainer.linear_mean_std:LinearMeanStdEnsembleTrainer",
+    "params": {
+      "maxiter": 10,
+      "l2_alpha": 0.001,
+      "diversity_min_points": 10,
+      "combo_rolling_window": 20
+    }
+  },
+  "scorer": {
+    "class_path": "scorer.ic_weighted:ICWeightedScorer",
+    "params": {
+      "icir_missing_gamma": 2.0,
+      "icir_missing_eps": 1e-6,
+      "w_daily": 0.3,
+      "w_monthly": 0.3,
+      "w_ic": 0.4
+    }
+  },
+  "quality_gate": {
+    "mode": "smooth",
+    "params": {
+      "min_finite_ratio": 0.8,
+      "skew_limit_check": 10.0,
+      "kurt_limit_check": 100.0,
+      "skew_limit_score": 100.0,
+      "kurt_limit_score": 1000.0,
+      "halflife_min_corr": 0.1,
+      "halflife_lag": 1
+    }
+  }
+}

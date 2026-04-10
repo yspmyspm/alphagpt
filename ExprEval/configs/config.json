@@ -1,0 +1,19 @@
+{
+  "data": {
+    "default_data_path": "../data/olhcv.feather",
+    "time_column": "_time"
+  },
+  "deployment": {
+    "ray_address": "auto",
+    "worker_count": 5,
+    "worker_num_cpus": 1,
+    "memory": null,
+    "resources": null,
+    "label_selector": null,
+    "replace_existing": true,
+    "keep_alive": false
+  },
+  "operators": {
+    "ts_parameters": [1, 5, 10, 30, 60, 120, 1440]
+  }
+}
